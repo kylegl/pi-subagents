@@ -93,6 +93,26 @@ export interface ChainExecutionResult {
 /**
  * Execute a chain of subagent steps
  */
+function slugifyTaskName(task: string, fallback: string): string {
+	const slug = task
+		.toLowerCase()
+		.replace(/\{[^}]+\}/g, " ")
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 80);
+	return slug || fallback;
+}
+
+function resolveDefaultChainDir(baseCwd: string, originalTask: string, runId: string): string {
+	const agentsRoot = path.join(baseCwd, ".agents");
+	const tasksRoot = path.join(agentsRoot, "tasks");
+	for (const dir of [agentsRoot, tasksRoot, path.join(agentsRoot, "notes"), path.join(agentsRoot, "docs"), path.join(agentsRoot, "sources")]) {
+		fs.mkdirSync(dir, { recursive: true });
+	}
+	const taskDirName = slugifyTaskName(originalTask, runId.slice(0, 12));
+	return path.join(tasksRoot, taskDirName);
+}
+
 export async function executeChain(params: ChainExecutionParams): Promise<ChainExecutionResult> {
 	const {
 		chain: chainSteps,
@@ -130,7 +150,8 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 		?? (isParallelStep(firstStep) ? firstStep.parallel[0]!.task! : (firstStep as SequentialStep).task!);
 
 	// Create chain directory
-	const chainDir = createChainDir(runId, chainDirBase);
+	const defaultChainDirBase = resolveDefaultChainDir(cwd ?? ctx.cwd, originalTask, runId);
+	const chainDir = createChainDir(runId, chainDirBase ?? defaultChainDirBase);
 
 	// Check if chain has any parallel steps
 	const hasParallelSteps = chainSteps.some(isParallelStep);

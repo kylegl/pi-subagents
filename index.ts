@@ -247,7 +247,7 @@ EXECUTION (use exactly ONE mode):
 CHAIN TEMPLATE VARIABLES (use in task strings):
 • {task} - The original task/request from the user
 • {previous} - Text response from the previous step (empty for first step)
-• {chain_dir} - Shared directory for chain files (e.g., <tmpdir>/pi-chain-runs/abc123/)
+• {chain_dir} - Shared directory for chain files (default: <cwd>/.agents/tasks/<task-slug>/<runId>/)
 
 CHAIN DATA FLOW:
 1. Each step's text response automatically becomes {previous} for the next step
