@@ -538,6 +538,10 @@ Notes:
 | `async` | boolean | false | Background execution (requires `clarify: false` for chains) |
 | `cwd` | string | - | Override working directory |
 | `maxOutput` | `{bytes?, lines?}` | 200KB, 5000 lines | Truncation limits for final output |
+
+> Task-directory convenience (single mode, when `cwd` is omitted):
+> - `spec`, `planner`, `reviewer`, `worker`: infer a matching directory under `<cwd>/.agents/tasks` from task text (for example, backticked ids like `` `letta-memfs-architecture` ``).
+> - `scout`, `context-builder`: first try to infer an existing task directory; when prompted to create a task (e.g. “create task `foo`”), they can create and use `<cwd>/.agents/tasks/foo`.
 | `artifacts` | boolean | true | Write debug artifacts |
 | `includeProgress` | boolean | false | Include full progress in result |
 | `share` | boolean | false | Upload session to GitHub Gist (see [Session Sharing](#session-sharing)) |

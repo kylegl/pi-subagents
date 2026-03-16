@@ -51,6 +51,7 @@ import { executeChain } from "./chain-execution.js";
 import { isAsyncAvailable, executeAsyncChain, executeAsyncSingle } from "./async-execution.js";
 import { discoverAvailableSkills, normalizeSkillInput } from "./skills.js";
 import { finalizeSingleOutput, injectSingleOutputInstruction, resolveSingleOutputPath } from "./single-output.js";
+import { resolveSingleAgentTaskCwd } from "./task-finder.js";
 import { AgentManagerComponent, type ManagerResult } from "./agent-manager.js";
 import { recordRun } from "./run-history.js";
 import { handleManagementAction } from "./agent-management.js";
@@ -450,12 +451,17 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 					}
 					const rawOutput = params.output !== undefined ? params.output : a.output;
 					const effectiveOutput: string | false | undefined = rawOutput === true ? a.output : rawOutput;
+					const inferredTaskCwd =
+						typeof params.task === "string" && !params.cwd
+							? resolveSingleAgentTaskCwd(params.agent!, params.task, ctx.cwd)
+							: undefined;
+					const effectiveCwd = params.cwd ?? inferredTaskCwd;
 					return executeAsyncSingle(id, {
 						agent: params.agent!,
 						task: params.task!,
 						agentConfig: a,
 						ctx: asyncCtx,
-						cwd: params.cwd,
+						cwd: effectiveCwd,
 						maxOutput: params.maxOutput,
 						artifactsDir: artifactConfig.enabled ? artifactsDir : undefined,
 						artifactConfig,
@@ -799,12 +805,17 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 						}
 						const id = randomUUID();
 						const asyncCtx = { pi, cwd: ctx.cwd, currentSessionId: currentSessionId! };
+						const inferredTaskCwd =
+							!params.cwd
+								? resolveSingleAgentTaskCwd(params.agent!, task, ctx.cwd)
+								: undefined;
+						const effectiveCwd = params.cwd ?? inferredTaskCwd;
 						return executeAsyncSingle(id, {
 							agent: params.agent!,
 							task,
 							agentConfig,
 							ctx: asyncCtx,
-							cwd: params.cwd,
+							cwd: effectiveCwd,
 							maxOutput: params.maxOutput,
 							artifactsDir: artifactConfig.enabled ? artifactsDir : undefined,
 							artifactConfig,
@@ -817,7 +828,12 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 				}
 
 				const cleanTask = task;
-				const outputPath = resolveSingleOutputPath(effectiveOutput, ctx.cwd, params.cwd);
+				const inferredTaskCwd =
+					!params.cwd
+						? resolveSingleAgentTaskCwd(params.agent!, task, ctx.cwd)
+						: undefined;
+				const effectiveCwd = params.cwd ?? inferredTaskCwd;
+				const outputPath = resolveSingleOutputPath(effectiveOutput, ctx.cwd, effectiveCwd);
 				task = injectSingleOutputInstruction(task, outputPath);
 
 				const effectiveSkills = skillOverride === false
@@ -827,7 +843,7 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 						: skillOverride;
 
 				const r = await runSync(ctx.cwd, agents, params.agent!, task, {
-					cwd: params.cwd,
+					cwd: effectiveCwd,
 					signal,
 					runId,
 					sessionDir: sessionDirForIndex(0),
