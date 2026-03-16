@@ -298,6 +298,50 @@ describe("chain execution — sequential", { skip: !available ? "pi packages not
 		assert.ok(!runModeResult.isError);
 		assert.ok(runModeResult.content[0].text.includes(path.join(taskRoot, taskId, runModeRunId)));
 	});
+
+	it("scaffolds create-task chains into .agents/tasks/<id>/content with context index", async () => {
+		mockPi.onCall({ output: "Scout findings" });
+		mockPi.onCall({ output: "Context builder findings" });
+		mockPi.onCall({ output: "Review findings" });
+
+		const agents = [
+			makeAgent("scout", { output: "context.md" }),
+			makeAgent("context-builder", { output: "context.md" }),
+			makeAgent("review", { output: "review.md" }),
+		];
+
+		const result = await executeChain(
+			makeChainParams(
+				[
+					{ agent: "scout", task: "Gather context" },
+					{ agent: "context-builder" },
+					{ agent: "review" },
+				],
+				agents,
+				{ task: "Create a task for `xyz` and prepare docs" },
+			),
+		);
+
+		assert.ok(!result.isError, `chain should succeed: ${JSON.stringify(result.content)}`);
+		const taskDir = path.join(tempDir, ".agents", "tasks", "xyz");
+		const contentDir = path.join(taskDir, "content");
+		assert.ok(fs.existsSync(taskDir), "task dir should be created");
+		assert.ok(fs.existsSync(contentDir), "content dir should exist");
+
+		const scoutDoc = path.join(contentDir, "scout.md");
+		const contextBuilderDoc = path.join(contentDir, "context-builder.md");
+		const reviewDoc = path.join(contentDir, "review.md");
+		assert.ok(fs.existsSync(scoutDoc), "scout doc should exist");
+		assert.ok(fs.existsSync(contextBuilderDoc), "context-builder doc should exist");
+		assert.ok(fs.existsSync(reviewDoc), "review doc should exist");
+
+		const contextIndex = path.join(taskDir, "context.md");
+		assert.ok(fs.existsSync(contextIndex), "context index should exist");
+		const indexText = fs.readFileSync(contextIndex, "utf-8");
+		assert.match(indexText, /\[scout\.md\]\(content\/scout\.md\)/);
+		assert.match(indexText, /\[context-builder\.md\]\(content\/context-builder\.md\)/);
+		assert.match(indexText, /\[review\.md\]\(content\/review\.md\)/);
+	});
 });
 
 describe("chain execution — parallel steps", { skip: !available ? "pi packages not available" : undefined }, () => {

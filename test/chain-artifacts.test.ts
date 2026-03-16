@@ -57,4 +57,19 @@ describe("resolveChainArtifactDir", () => {
 			removeTempDir(tempDir);
 		}
 	});
+
+	it("routes create-task prompts directly to .agents/tasks/<taskId>", () => {
+		const tempDir = createTempDir();
+		try {
+			const resolved = resolveChainArtifactDir({
+				runId: "run-4",
+				baseCwd: tempDir,
+				originalTask: "Create a task for `xyz` and gather context",
+			});
+			assert.equal(resolved, path.join(tempDir, ".agents", "tasks", "xyz"));
+			assert.ok(fs.existsSync(resolved));
+		} finally {
+			removeTempDir(tempDir);
+		}
+	});
 });

@@ -7,6 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createChainDir, type ChainDirMode } from "./settings.js";
+import { inferTaskIdToCreate, shouldCreateTaskFromText } from "./task-finder.js";
 
 export interface ChainArtifactRouteParams {
 	runId: string;
@@ -69,6 +70,12 @@ export function resolveChainArtifactDir(params: ChainArtifactRouteParams): strin
 	}
 
 	const defaultTaskRoot = resolveDefaultTaskRoot(baseCwd);
+	if (shouldCreateTaskFromText(originalTask)) {
+		const inferredTaskId = inferTaskIdToCreate(originalTask);
+		if (inferredTaskId) {
+			return createChainDir(runId, path.join(defaultTaskRoot, inferredTaskId), "direct");
+		}
+	}
 	const taskDirName = slugifyTaskName(originalTask, runId.slice(0, 12));
 	return createChainDir(runId, path.join(defaultTaskRoot, taskDirName), "run");
 }

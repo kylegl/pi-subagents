@@ -27,6 +27,7 @@ import { resolveChainArtifactDir } from "./chain-artifacts.js";
 import { discoverAvailableSkills, normalizeSkillInput } from "./skills.js";
 import { runSync } from "./execution.js";
 import { buildChainSummary } from "./formatters.js";
+import { ensureScaffoldDoc, scaffoldOutputPath, shouldUseTaskScaffold, writeTaskContextIndex } from "./task-scaffold.js";
 import { getFinalOutput, mapConcurrent } from "./utils.js";
 import { recordRun } from "./run-history.js";
 import {
@@ -134,6 +135,9 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 	const firstStep = chainSteps[0]!;
 	const originalTask = params.task
 		?? (isParallelStep(firstStep) ? firstStep.parallel[0]!.task! : (firstStep as SequentialStep).task!);
+
+	const useTaskScaffold = shouldUseTaskScaffold(originalTask, chainAgents);
+	const scaffoldOutputs = new Set<string>();
 
 	// Create chain directory
 	const chainDir = resolveChainArtifactDir({
@@ -463,7 +467,13 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 						? tuiOverride.skills
 						: normalizeSkillInput(seqStep.skill),
 			};
-			const behavior = resolveStepBehavior(agentConfig, stepOverride, chainSkills);
+			let behavior = resolveStepBehavior(agentConfig, stepOverride, chainSkills);
+			if (useTaskScaffold) {
+				behavior = {
+					...behavior,
+					output: scaffoldOutputPath(seqStep.agent, scaffoldOutputs),
+				};
+			}
 
 			// Determine if this is the first agent to create progress.md
 			const isFirstProgress = behavior.progress && !progressCreated;
@@ -534,6 +544,13 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 			if (r.progress) allProgress.push(r.progress);
 			if (r.artifactPaths) allArtifactPaths.push(r.artifactPaths);
 
+			if (useTaskScaffold && behavior.output && r.exitCode === 0) {
+				const scaffoldText = getFinalOutput(r.messages);
+				if (scaffoldText.trim()) {
+					ensureScaffoldDoc(chainDir, behavior.output, scaffoldText);
+				}
+			}
+
 			// Validate expected output file was created
 			if (behavior.output && r.exitCode === 0) {
 				try {
@@ -578,6 +595,10 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 
 			prev = getFinalOutput(r.messages);
 		}
+	}
+
+	if (useTaskScaffold) {
+		writeTaskContextIndex(chainDir);
 	}
 
 	// Chain complete - return summary with paths

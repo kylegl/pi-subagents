@@ -151,6 +151,14 @@ export function inferTaskScopedCwd(taskText: string, baseCwd: string): string | 
 	return matchExistingTaskDir(taskText, baseCwd);
 }
 
+export function shouldCreateTaskFromText(taskText: string): boolean {
+	return hasCreateTaskIntent(taskText);
+}
+
+export function inferTaskIdToCreate(taskText: string): string | undefined {
+	return extractTaskIdToCreate(taskText);
+}
+
 /**
  * Resolve task-scoped cwd for single-agent runs.
  *
