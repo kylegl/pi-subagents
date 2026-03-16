@@ -12,7 +12,17 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AgentConfig } from "./agents.js";
 import { applyThinkingSuffix } from "./execution.js";
 import { injectSingleOutputInstruction, resolveSingleOutputPath } from "./single-output.js";
-import { isParallelStep, resolveStepBehavior, type ChainStep, type ParallelStep, type SequentialStep, type StepOverrides } from "./settings.js";
+import {
+	isParallelStep,
+	resolveChainTemplates,
+	resolveStepBehavior,
+	resolveParallelBehaviors,
+	type ChainStep,
+	type SequentialStep,
+	type StepOverrides,
+	type ResolvedStepBehavior,
+} from "./settings.js";
+import { resolveChainArtifactDir } from "./chain-artifacts.js";
 import type { RunnerStep } from "./parallel-utils.js";
 import { resolvePiPackageRoot } from "./pi-spawn.js";
 import { buildSkillInjection, normalizeSkillInput, resolveSkills } from "./skills.js";
@@ -53,6 +63,7 @@ export interface AsyncExecutionContext {
 
 export interface AsyncChainParams {
 	chain: ChainStep[];
+	task?: string;
 	agents: AgentConfig[];
 	ctx: AsyncExecutionContext;
 	cwd?: string;
@@ -62,6 +73,10 @@ export interface AsyncChainParams {
 	shareEnabled: boolean;
 	sessionRoot?: string;
 	chainSkills?: string[];
+	chainDir?: string;
+	taskId?: string;
+	taskRoot?: string;
+	taskMode?: "direct" | "run";
 }
 
 export interface AsyncSingleParams {
@@ -143,12 +158,44 @@ export function executeAsyncChain(
 		fs.mkdirSync(asyncDir, { recursive: true });
 	} catch {}
 
+	const runnerCwd = cwd ?? ctx.cwd;
+	const firstStep = chain[0];
+	const originalTask = params.task
+		?? (firstStep
+			? (isParallelStep(firstStep) ? firstStep.parallel[0]?.task : (firstStep as SequentialStep).task)
+			: undefined)
+		?? "";
+
+	const chainDir = resolveChainArtifactDir({
+		runId: id,
+		baseCwd: runnerCwd,
+		originalTask,
+		chainDir: params.chainDir,
+		taskId: params.taskId,
+		taskRoot: params.taskRoot,
+		taskMode: params.taskMode,
+	});
+
+	const templates = resolveChainTemplates(chain);
+	const applyChainVars = (template: string): string =>
+		template
+			.replace(/\{task\}/g, originalTask)
+			.replace(/\{chain_dir\}/g, chainDir);
+
 	/** Build a resolved runner step from a SequentialStep */
-	const buildSeqStep = (s: SequentialStep) => {
+	const buildSeqStep = (
+		s: SequentialStep,
+		taskTemplate: string,
+		behaviorOverride?: ResolvedStepBehavior,
+	) => {
 		const a = agents.find((x) => x.name === s.agent)!;
 		const stepSkillInput = normalizeSkillInput(s.skill);
-		const stepOverrides: StepOverrides = { skills: stepSkillInput };
-		const behavior = resolveStepBehavior(a, stepOverrides, chainSkills);
+		const stepOverrides: StepOverrides = {
+			skills: stepSkillInput,
+			output: s.output,
+			model: s.model,
+		};
+		const behavior = behaviorOverride ?? resolveStepBehavior(a, stepOverrides, chainSkills);
 		const skillNames = behavior.skills === false ? [] : behavior.skills;
 		const { resolved: resolvedSkills } = resolveSkills(skillNames, ctx.cwd);
 
@@ -158,16 +205,16 @@ export function executeAsyncChain(
 			systemPrompt = systemPrompt ? `${systemPrompt}\n\n${injection}` : injection;
 		}
 
-		// Resolve output path and inject instruction into task
-		// Use step's cwd if specified, otherwise fall back to chain-level cwd
-		const outputPath = resolveSingleOutputPath(s.output, ctx.cwd, s.cwd ?? cwd);
-		const task = injectSingleOutputInstruction(s.task ?? "{previous}", outputPath);
+		const outputPath = typeof behavior.output === "string"
+			? (path.isAbsolute(behavior.output) ? behavior.output : path.join(chainDir, behavior.output))
+			: undefined;
+		const task = injectSingleOutputInstruction(applyChainVars(taskTemplate), outputPath);
 
 		return {
 			agent: s.agent,
 			task,
 			cwd: s.cwd,
-			model: applyThinkingSuffix(s.model ?? a.model, a.thinking),
+			model: applyThinkingSuffix(behavior.model ?? a.model, a.thinking),
 			tools: a.tools,
 			extensions: a.extensions,
 			mcpDirectTools: a.mcpDirectTools,
@@ -179,25 +226,23 @@ export function executeAsyncChain(
 
 	// Build runner steps — sequential steps become flat objects,
 	// parallel steps become { parallel: [...], concurrency?, failFast? }
-	const steps: RunnerStep[] = chain.map((s) => {
+	const steps: RunnerStep[] = chain.map((s, stepIndex) => {
+		const stepTemplates = templates[stepIndex]!;
 		if (isParallelStep(s)) {
+			const parallelTemplates = stepTemplates as string[];
+			const parallelBehaviors = resolveParallelBehaviors(s.parallel, agents, stepIndex, chainSkills);
 			return {
-				parallel: s.parallel.map((t) => buildSeqStep({
-					agent: t.agent,
-					task: t.task,
-					cwd: t.cwd,
-					skill: t.skill,
-					model: t.model,
-					output: t.output,
-				})),
+				parallel: s.parallel.map((t, taskIndex) => buildSeqStep(
+					{ agent: t.agent, cwd: t.cwd, skill: t.skill, model: t.model, output: t.output },
+					parallelTemplates[taskIndex] ?? "{previous}",
+					parallelBehaviors[taskIndex],
+				)),
 				concurrency: s.concurrency,
 				failFast: s.failFast,
 			};
 		}
-		return buildSeqStep(s as SequentialStep);
+		return buildSeqStep(s as SequentialStep, stepTemplates as string);
 	});
-
-	const runnerCwd = cwd ?? ctx.cwd;
 	const pid = spawnRunner(
 		{
 			id,
@@ -218,20 +263,19 @@ export function executeAsyncChain(
 		runnerCwd,
 	);
 
-	if (pid) {
-		const firstStep = chain[0];
+	if (pid && firstStep) {
 		const firstAgents = isParallelStep(firstStep)
 			? firstStep.parallel.map((t) => t.agent)
-			: [(firstStep as SequentialStep).agent];
+			: [firstStep.agent];
 		ctx.pi.events.emit("subagent:started", {
 			id,
 			pid,
 			agent: firstAgents[0],
 			task: isParallelStep(firstStep)
 				? firstStep.parallel[0]?.task?.slice(0, 50)
-				: (firstStep as SequentialStep).task?.slice(0, 50),
+				: firstStep.task?.slice(0, 50),
 			chain: chain.map((s) =>
-				isParallelStep(s) ? `[${s.parallel.map((t) => t.agent).join("+")}]` : (s as SequentialStep).agent,
+				isParallelStep(s) ? `[${s.parallel.map((t) => t.agent).join("+")}]` : s.agent,
 			),
 			cwd: runnerCwd,
 			asyncDir,

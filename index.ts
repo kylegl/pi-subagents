@@ -247,7 +247,7 @@ EXECUTION (use exactly ONE mode):
 CHAIN TEMPLATE VARIABLES (use in task strings):
 • {task} - The original task/request from the user
 • {previous} - Text response from the previous step (empty for first step)
-• {chain_dir} - Shared directory for chain files (default: <cwd>/.agents/tasks/<task-slug>/<runId>/)
+• {chain_dir} - Shared directory for chain files (default: <cwd>/.agents/tasks/<task-slug>/<runId>/; override via chainDir, or taskId/taskRoot/taskMode)
 
 CHAIN DATA FLOW:
 1. Each step's text response automatically becomes {previous} for the next step
@@ -422,6 +422,7 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 					const chainSkills = normalized === false ? [] : (normalized ?? []);
 					return executeAsyncChain(id, {
 						chain: params.chain as ChainStep[],
+						task: params.task,
 						agents,
 						ctx: asyncCtx,
 						cwd: params.cwd,
@@ -431,6 +432,10 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 						shareEnabled,
 						sessionRoot,
 						chainSkills,
+						chainDir: params.chainDir,
+						taskId: params.taskId,
+						taskRoot: params.taskRoot,
+						taskMode: params.taskMode,
 					});
 				}
 
@@ -491,6 +496,9 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 					onUpdate,
 					chainSkills,
 					chainDir: params.chainDir,
+					taskId: params.taskId,
+					taskRoot: params.taskRoot,
+					taskMode: params.taskMode,
 				});
 
 				// User requested async via TUI - dispatch to async executor
@@ -506,6 +514,7 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 					const asyncCtx = { pi, cwd: ctx.cwd, currentSessionId: currentSessionId! };
 					return executeAsyncChain(id, {
 						chain: chainResult.requestedAsync.chain,
+						task: params.task,
 						agents,
 						ctx: asyncCtx,
 						cwd: params.cwd,
@@ -515,6 +524,10 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 						shareEnabled,
 						sessionRoot,
 						chainSkills: chainResult.requestedAsync.chainSkills,
+						chainDir: params.chainDir,
+						taskId: params.taskId,
+						taskRoot: params.taskRoot,
+						taskMode: params.taskMode,
 					});
 				}
 

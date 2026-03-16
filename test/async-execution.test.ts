@@ -10,6 +10,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { createTempDir, removeTempDir, tryImport } from "./helpers.ts";
 
@@ -19,12 +20,92 @@ const utils = await tryImport<any>("./utils.ts");
 const available = !!(asyncMod && utils);
 
 const isAsyncAvailable = asyncMod?.isAsyncAvailable;
+const executeAsyncChain = asyncMod?.executeAsyncChain;
 const readStatus = utils?.readStatus;
 
 describe("async execution utilities", { skip: !available ? "pi packages not available" : undefined }, () => {
 	it("reports jiti availability as boolean", () => {
 		const result = isAsyncAvailable();
 		assert.equal(typeof result, "boolean");
+	});
+
+	it("executeAsyncChain routes taskId artifacts consistently", () => {
+		if (!isAsyncAvailable()) return;
+		const tempDir = createTempDir();
+		const id = `async-route-${Date.now().toString(36)}`;
+		const taskId = "ticket-42";
+		let startedPid: number | undefined;
+		try {
+			executeAsyncChain(id, {
+				chain: [{ agent: "worker", task: "Use {chain_dir}", output: "out.md" }],
+				agents: [{ name: "worker" }],
+				ctx: {
+					cwd: tempDir,
+					currentSessionId: "session-test",
+					pi: {
+						events: {
+							emit: (_event: string, payload: any) => {
+								startedPid = payload?.pid;
+							},
+						},
+					},
+				} as any,
+				cwd: tempDir,
+				artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 1 },
+				shareEnabled: false,
+				taskId,
+			});
+
+			const cfgPath = path.join(os.tmpdir(), `pi-async-cfg-${id}.json`);
+			assert.ok(fs.existsSync(cfgPath), "runner config file should exist");
+			const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+			const expectedChainDir = path.join(tempDir, ".agents", "tasks", taskId);
+			assert.ok(cfg.steps[0].task.includes(expectedChainDir), "task should use resolved chain_dir");
+			assert.equal(cfg.steps[0].outputPath, path.join(expectedChainDir, "out.md"));
+		} finally {
+			if (startedPid) {
+				try { process.kill(startedPid); } catch {}
+			}
+			try { fs.rmSync(path.join(os.tmpdir(), `pi-async-cfg-${id}.json`), { force: true }); } catch {}
+			removeTempDir(path.join(os.tmpdir(), "pi-async-subagent-runs", id));
+			removeTempDir(tempDir);
+		}
+	});
+
+	it("executeAsyncChain prefers chainDir over taskId", () => {
+		if (!isAsyncAvailable()) return;
+		const tempDir = createTempDir();
+		const id = `async-precedence-${Date.now().toString(36)}`;
+		const customBase = path.join(tempDir, "custom-chain");
+		let startedPid: number | undefined;
+		try {
+			executeAsyncChain(id, {
+				chain: [{ agent: "worker", task: "Use {chain_dir}" }],
+				agents: [{ name: "worker" }],
+				ctx: {
+					cwd: tempDir,
+					currentSessionId: "session-test",
+					pi: { events: { emit: (_event: string, payload: any) => { startedPid = payload?.pid; } } },
+				} as any,
+				cwd: tempDir,
+				artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 1 },
+				shareEnabled: false,
+				chainDir: customBase,
+				taskId: "ignored-task-id",
+			});
+
+			const cfgPath = path.join(os.tmpdir(), `pi-async-cfg-${id}.json`);
+			assert.ok(fs.existsSync(cfgPath), "runner config file should exist");
+			const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+			assert.ok(cfg.steps[0].task.includes(path.join(customBase, id)), "task should use chainDir-derived path");
+		} finally {
+			if (startedPid) {
+				try { process.kill(startedPid); } catch {}
+			}
+			try { fs.rmSync(path.join(os.tmpdir(), `pi-async-cfg-${id}.json`), { force: true }); } catch {}
+			removeTempDir(path.join(os.tmpdir(), "pi-async-subagent-runs", id));
+			removeTempDir(tempDir);
+		}
 	});
 
 	it("readStatus returns null for missing directory", () => {

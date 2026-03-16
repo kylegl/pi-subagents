@@ -254,4 +254,15 @@ describe("createChainDir", { skip: !available ? "pi packages not available" : un
 			removeTempDir(base);
 		}
 	});
+
+	it("supports direct mode (no runId subdirectory)", () => {
+		const base = createTempDir("chain-direct-");
+		try {
+			const dir = createChainDir("run-abc", base, "direct");
+			assert.equal(dir, path.resolve(base));
+			assert.ok(fs.existsSync(dir));
+		} finally {
+			removeTempDir(base);
+		}
+	});
 });

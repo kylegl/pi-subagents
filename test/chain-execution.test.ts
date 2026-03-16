@@ -212,17 +212,91 @@ describe("chain execution — sequential", { skip: !available ? "pi packages not
 		mockPi.onCall({ output: "Done" });
 		const agents = [makeAgent("worker")];
 		const customChainDir = path.join(tempDir, "my-chain");
+		const runId = "chaindir-run";
 
 		const result = await executeChain(
 			makeChainParams(
 				[{ agent: "worker", task: "Use {chain_dir}" }],
 				agents,
-				{ chainDir: customChainDir },
+				{ chainDir: customChainDir, runId },
 			),
 		);
 
 		assert.ok(!result.isError);
 		assert.ok(fs.existsSync(customChainDir), "custom chainDir should exist");
+		assert.ok(result.content[0].text.includes(path.join(customChainDir, runId)));
+	});
+
+	it("routes taskId to <cwd>/.agents/tasks/<taskId> by default", async () => {
+		mockPi.onCall({ output: "Done" });
+		const agents = [makeAgent("worker")];
+		const runId = "taskid-default";
+		const taskId = "ticket-123";
+		const expected = path.join(tempDir, ".agents", "tasks", taskId);
+
+		const result = await executeChain(
+			makeChainParams(
+				[{ agent: "worker", task: "Use {chain_dir}" }],
+				agents,
+				{ taskId, runId },
+			),
+		);
+
+		assert.ok(!result.isError);
+		assert.ok(fs.existsSync(expected), "taskId directory should exist");
+		assert.ok(result.content[0].text.includes(expected), "summary should point to taskId directory");
+		assert.ok(!result.content[0].text.includes(path.join(expected, runId)), "default taskId mode should be direct");
+	});
+
+	it("uses chainDir over taskId when both are provided", async () => {
+		mockPi.onCall({ output: "Done" });
+		const agents = [makeAgent("worker")];
+		const customChainDir = path.join(tempDir, "preferred-chain-dir");
+		const runId = "precedence-run";
+		const taskIdDir = path.join(tempDir, ".agents", "tasks", "ignored-task-id");
+
+		const result = await executeChain(
+			makeChainParams(
+				[{ agent: "worker", task: "Use {chain_dir}" }],
+				agents,
+				{ chainDir: customChainDir, taskId: "ignored-task-id", runId },
+			),
+		);
+
+		assert.ok(!result.isError);
+		assert.ok(result.content[0].text.includes(path.join(customChainDir, runId)));
+		assert.ok(!fs.existsSync(taskIdDir), "taskId directory should not be used when chainDir is provided");
+	});
+
+	it("supports taskMode direct vs run for taskId routing", async () => {
+		mockPi.onCall({ output: "Done" });
+		mockPi.onCall({ output: "Done" });
+		const agents = [makeAgent("worker")];
+		const taskRoot = path.join(tempDir, "task-root");
+		const taskId = "shared-task";
+
+		const directRunId = "direct-run";
+		const directResult = await executeChain(
+			makeChainParams(
+				[{ agent: "worker", task: "Use {chain_dir}" }],
+				agents,
+				{ taskId, taskRoot, taskMode: "direct", runId: directRunId },
+			),
+		);
+		assert.ok(!directResult.isError);
+		assert.ok(directResult.content[0].text.includes(path.join(taskRoot, taskId)));
+		assert.ok(!directResult.content[0].text.includes(path.join(taskRoot, taskId, directRunId)));
+
+		const runModeRunId = "run-mode";
+		const runModeResult = await executeChain(
+			makeChainParams(
+				[{ agent: "worker", task: "Use {chain_dir}" }],
+				agents,
+				{ taskId, taskRoot, taskMode: "run", runId: runModeRunId },
+			),
+		);
+		assert.ok(!runModeResult.isError);
+		assert.ok(runModeResult.content[0].text.includes(path.join(taskRoot, taskId, runModeRunId)));
 	});
 });
 

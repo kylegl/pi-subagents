@@ -529,7 +529,10 @@ Notes:
 | `model` | string | agent default | Override model for single agent |
 | `tasks` | `{agent, task, cwd?, skill?}[]` | - | Parallel tasks (sync only) |
 | `chain` | ChainItem[] | - | Sequential steps with behavior overrides (see below) |
-| `chainDir` | string | `<tmpdir>/pi-chain-runs/` | Persistent directory for chain artifacts (default auto-cleaned after 24h) |
+| `chainDir` | string | - | Persistent base directory for chain artifacts (takes precedence over `taskId` routing) |
+| `taskId` | string | - | Logical task id for chain artifacts (`<taskRoot>/<taskId>`) when `chainDir` is not set |
+| `taskRoot` | string | `<cwd>/.agents/tasks` | Base directory used with `taskId` |
+| `taskMode` | `"direct" \| "run"` | `direct` (with `taskId`) | `direct`: write to `<taskRoot>/<taskId>`; `run`: write to `<taskRoot>/<taskId>/<runId>` |
 | `clarify` | boolean | true (chains) | Show TUI to preview/edit chain; implies sync mode |
 | `agentScope` | `"user" \| "project" \| "both"` | `both` | Agent discovery scope (project wins on name collisions) |
 | `async` | boolean | false | Background execution (requires `clarify: false` for chains) |
@@ -626,7 +629,12 @@ Session root resolution follows this precedence:
 Sessions are always enabled — every subagent run gets a session directory for tracking.
 
 ## Chain Directory
-Each chain run creates `<tmpdir>/pi-chain-runs/{runId}/` containing:
+Chain artifact directory precedence:
+1. `chainDir` provided → uses that base (with run subdir)
+2. `taskId` provided → `<taskRoot>/<taskId>` (`taskMode: "direct"`) or `<taskRoot>/<taskId>/<runId>` (`taskMode: "run"`)
+3. default → `<cwd>/.agents/tasks/<task-slug>/<runId>`
+
+The resolved directory contains:
 - `context.md` - Scout/context-builder output
 - `plan.md` - Planner output
 - `progress.md` - Worker/reviewer shared progress

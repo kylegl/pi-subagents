@@ -10,7 +10,6 @@ import type { AgentConfig } from "./agents.js";
 import { ChainClarifyComponent, type ChainClarifyResult, type BehaviorOverride, type ModelInfo } from "./chain-clarify.js";
 import {
 	resolveChainTemplates,
-	createChainDir,
 	removeChainDir,
 	resolveStepBehavior,
 	resolveParallelBehaviors,
@@ -24,6 +23,7 @@ import {
 	type ParallelTaskResult,
 	type ResolvedTemplates,
 } from "./settings.js";
+import { resolveChainArtifactDir } from "./chain-artifacts.js";
 import { discoverAvailableSkills, normalizeSkillInput } from "./skills.js";
 import { runSync } from "./execution.js";
 import { buildChainSummary } from "./formatters.js";
@@ -77,6 +77,9 @@ export interface ChainExecutionParams {
 	onUpdate?: (r: AgentToolResult<Details>) => void;
 	chainSkills?: string[];
 	chainDir?: string;
+	taskId?: string;
+	taskRoot?: string;
+	taskMode?: "direct" | "run";
 }
 
 export interface ChainExecutionResult {
@@ -93,26 +96,6 @@ export interface ChainExecutionResult {
 /**
  * Execute a chain of subagent steps
  */
-function slugifyTaskName(task: string, fallback: string): string {
-	const slug = task
-		.toLowerCase()
-		.replace(/\{[^}]+\}/g, " ")
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.slice(0, 80);
-	return slug || fallback;
-}
-
-function resolveDefaultChainDir(baseCwd: string, originalTask: string, runId: string): string {
-	const agentsRoot = path.join(baseCwd, ".agents");
-	const tasksRoot = path.join(agentsRoot, "tasks");
-	for (const dir of [agentsRoot, tasksRoot, path.join(agentsRoot, "notes"), path.join(agentsRoot, "docs"), path.join(agentsRoot, "sources")]) {
-		fs.mkdirSync(dir, { recursive: true });
-	}
-	const taskDirName = slugifyTaskName(originalTask, runId.slice(0, 12));
-	return path.join(tasksRoot, taskDirName);
-}
-
 export async function executeChain(params: ChainExecutionParams): Promise<ChainExecutionResult> {
 	const {
 		chain: chainSteps,
@@ -130,6 +113,9 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 		onUpdate,
 		chainSkills: chainSkillsParam,
 		chainDir: chainDirBase,
+		taskId,
+		taskRoot,
+		taskMode,
 	} = params;
 	const chainSkills = chainSkillsParam ?? [];
 
@@ -150,8 +136,15 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 		?? (isParallelStep(firstStep) ? firstStep.parallel[0]!.task! : (firstStep as SequentialStep).task!);
 
 	// Create chain directory
-	const defaultChainDirBase = resolveDefaultChainDir(cwd ?? ctx.cwd, originalTask, runId);
-	const chainDir = createChainDir(runId, chainDirBase ?? defaultChainDirBase);
+	const chainDir = resolveChainArtifactDir({
+		runId,
+		baseCwd: cwd ?? ctx.cwd,
+		originalTask,
+		chainDir: chainDirBase,
+		taskId,
+		taskRoot,
+		taskMode,
+	});
 
 	// Check if chain has any parallel steps
 	const hasParallelSteps = chainSteps.some(isParallelStep);

@@ -89,8 +89,11 @@ export function getStepAgents(step: ChainStep): string[] {
 // Chain Directory Management
 // =============================================================================
 
-export function createChainDir(runId: string, baseDir?: string): string {
-	const chainDir = path.join(baseDir ? path.resolve(baseDir) : CHAIN_RUNS_DIR, runId);
+export type ChainDirMode = "run" | "direct";
+
+export function createChainDir(runId: string, baseDir?: string, mode: ChainDirMode = "run"): string {
+	const resolvedBase = baseDir ? path.resolve(baseDir) : CHAIN_RUNS_DIR;
+	const chainDir = mode === "direct" ? resolvedBase : path.join(resolvedBase, runId);
 	fs.mkdirSync(chainDir, { recursive: true });
 	return chainDir;
 }
