@@ -50,8 +50,16 @@ import { SubagentParams, StatusParams } from "./schemas.js";
 import { executeChain } from "./chain-execution.js";
 import { isAsyncAvailable, executeAsyncChain, executeAsyncSingle } from "./async-execution.js";
 import { discoverAvailableSkills, normalizeSkillInput } from "./skills.js";
-import { finalizeSingleOutput, injectSingleOutputInstruction, resolveSingleOutputPath } from "./single-output.js";
+import {
+	finalizeSingleOutput,
+	injectSingleOutputInstruction,
+	injectSingleReadInstruction,
+	resolveSingleOutputPath,
+	resolveSingleProgressPath,
+	resolveSingleReadPaths,
+} from "./single-output.js";
 import { resolveSingleAgentTaskCwd } from "./task-finder.js";
+import { appendTraceEvent, extractTaskIdFromPath, generateSpanId, resolveTaskTraceFile } from "./trace.js";
 import { AgentManagerComponent, type ManagerResult } from "./agent-manager.js";
 import { recordRun } from "./run-history.js";
 import { handleManagementAction } from "./agent-management.js";
@@ -324,6 +332,38 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
 			const hasSingle = Boolean(params.agent && params.task);
 
+			const inheritedTraceId = process.env.PI_SUBAGENT_TRACE_ID;
+			const inheritedParentSpanId = process.env.PI_SUBAGENT_PARENT_SPAN_ID;
+			const inheritedTaskId = process.env.PI_SUBAGENT_TASK_ID;
+			const inheritedTraceFile = process.env.PI_SUBAGENT_TRACE_FILE;
+			const traceTaskId =
+				params.taskId
+				?? inheritedTaskId
+				?? extractTaskIdFromPath(params.chainDir)
+				?? extractTaskIdFromPath(params.cwd)
+				?? extractTaskIdFromPath(ctx.cwd);
+			const traceFile = inheritedTraceFile
+				?? resolveTaskTraceFile(ctx.cwd, traceTaskId, params.taskRoot, params.chainDir ?? params.cwd);
+			const callTrace = {
+				traceId: inheritedTraceId ?? runId,
+				spanId: generateSpanId(),
+				parentSpanId: inheritedParentSpanId,
+				taskId: traceTaskId,
+				traceFile,
+				op: "subagent.execute",
+			};
+			appendTraceEvent(callTrace.traceFile, {
+				type: "subagent.call.started",
+				ts: Date.now(),
+				traceId: callTrace.traceId,
+				spanId: callTrace.spanId,
+				parentSpanId: callTrace.parentSpanId,
+				taskId: callTrace.taskId,
+				op: callTrace.op,
+				runId,
+				mode: hasChain ? "chain" : hasTasks ? "parallel" : hasSingle ? "single" : "unknown",
+			});
+
 			const requestedAsync = params.async ?? asyncByDefault;
 			const parallelDowngraded = hasTasks && requestedAsync;
 			// clarify implies sync mode (TUI is blocking)
@@ -505,6 +545,7 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 					taskId: params.taskId,
 					taskRoot: params.taskRoot,
 					taskMode: params.taskMode,
+					trace: callTrace,
 				});
 
 				// User requested async via TUI - dispatch to async executor
@@ -661,6 +702,14 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 						signal,
 						runId,
 						index: i,
+						trace: {
+							traceId: callTrace.traceId,
+							parentSpanId: callTrace.spanId,
+							spanId: generateSpanId(),
+							taskId: callTrace.taskId,
+							traceFile: callTrace.traceFile,
+							op: `parallel.task.${i + 1}.${t.agent}`,
+						},
 						sessionDir: sessionDirForIndex(i),
 						share: shareEnabled,
 						artifactsDir: artifactConfig.enabled ? artifactsDir : undefined,
@@ -833,7 +882,10 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 						? resolveSingleAgentTaskCwd(params.agent!, task, ctx.cwd)
 						: undefined;
 				const effectiveCwd = params.cwd ?? inferredTaskCwd;
+				const readPaths = resolveSingleReadPaths(agentConfig.defaultReads, ctx.cwd, effectiveCwd);
 				const outputPath = resolveSingleOutputPath(effectiveOutput, ctx.cwd, effectiveCwd);
+				const progressPath = resolveSingleProgressPath(outputPath, ctx.cwd, effectiveCwd);
+				task = injectSingleReadInstruction(task, readPaths);
 				task = injectSingleOutputInstruction(task, outputPath);
 
 				const effectiveSkills = skillOverride === false
@@ -846,6 +898,14 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 					cwd: effectiveCwd,
 					signal,
 					runId,
+					trace: {
+						traceId: callTrace.traceId,
+						parentSpanId: callTrace.spanId,
+						spanId: generateSpanId(),
+						taskId: callTrace.taskId ?? extractTaskIdFromPath(effectiveCwd),
+						traceFile: callTrace.traceFile,
+						op: `single.${params.agent}`,
+					},
 					sessionDir: sessionDirForIndex(0),
 					share: shareEnabled,
 					artifactsDir: artifactConfig.enabled ? artifactsDir : undefined,
@@ -864,7 +924,7 @@ MANAGEMENT (use action field — omit agent/task/chain/tasks):
 				const finalizedOutput = finalizeSingleOutput({
 					fullOutput,
 					truncatedOutput: r.truncation?.text,
-					outputPath,
+					outputPath: progressPath,
 					exitCode: r.exitCode,
 				});
 

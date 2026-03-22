@@ -11,7 +11,13 @@ import { createRequire } from "node:module";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AgentConfig } from "./agents.js";
 import { applyThinkingSuffix } from "./execution.js";
-import { injectSingleOutputInstruction, resolveSingleOutputPath } from "./single-output.js";
+import {
+	injectSingleOutputInstruction,
+	injectSingleReadInstruction,
+	resolveSingleOutputPath,
+	resolveSingleProgressPath,
+	resolveSingleReadPaths,
+} from "./single-output.js";
 import {
 	isParallelStep,
 	resolveChainTemplates,
@@ -317,8 +323,11 @@ export function executeAsyncSingle(
 	} catch {}
 
 	const runnerCwd = cwd ?? ctx.cwd;
+	const readPaths = resolveSingleReadPaths(agentConfig.defaultReads, ctx.cwd, cwd);
 	const outputPath = resolveSingleOutputPath(params.output, ctx.cwd, cwd);
-	const taskWithOutputInstruction = injectSingleOutputInstruction(task, outputPath);
+	const progressPath = resolveSingleProgressPath(outputPath, ctx.cwd, cwd);
+	const taskWithReadInstruction = injectSingleReadInstruction(task, readPaths);
+	const taskWithOutputInstruction = injectSingleOutputInstruction(taskWithReadInstruction, outputPath);
 	const pid = spawnRunner(
 		{
 			id,
@@ -334,6 +343,7 @@ export function executeAsyncSingle(
 					systemPrompt,
 					skills: resolvedSkills.map((r) => r.name),
 					outputPath,
+					summaryPath: progressPath,
 				},
 			],
 			resultPath: path.join(RESULTS_DIR, `${id}.json`),

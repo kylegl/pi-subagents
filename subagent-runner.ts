@@ -354,16 +354,16 @@ async function runSingleStep(
 
 	const output = (result.stdout || "").trim();
 	let outputForSummary = output;
-	if (step.outputPath && result.exitCode === 0) {
-		const persisted = persistSingleOutput(step.outputPath, output);
+	if (step.summaryPath && result.exitCode === 0) {
+		const persisted = persistSingleOutput(step.summaryPath, output);
 		if (persisted.savedPath) {
 			outputForSummary = output
 				? `${output}\n\n📄 Output saved to: ${persisted.savedPath}`
 				: `📄 Output saved to: ${persisted.savedPath}`;
 		} else if (persisted.error) {
 			outputForSummary = output
-				? `${output}\n\n⚠️ Failed to save output to: ${step.outputPath}\n${persisted.error}`
-				: `⚠️ Failed to save output to: ${step.outputPath}\n${persisted.error}`;
+				? `${output}\n\n⚠️ Failed to save output to: ${step.summaryPath}\n${persisted.error}`
+				: `⚠️ Failed to save output to: ${step.summaryPath}\n${persisted.error}`;
 		}
 	}
 

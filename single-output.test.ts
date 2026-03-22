@@ -3,7 +3,14 @@ import { afterEach, describe, it } from "node:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { finalizeSingleOutput, injectSingleOutputInstruction, resolveSingleOutputPath } from "./single-output.ts";
+import {
+	finalizeSingleOutput,
+	injectSingleOutputInstruction,
+	injectSingleReadInstruction,
+	resolveSingleOutputPath,
+	resolveSingleProgressPath,
+	resolveSingleReadPaths,
+} from "./single-output.ts";
 
 const tempDirs: string[] = [];
 
@@ -13,6 +20,16 @@ afterEach(() => {
 		if (!dir) continue;
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+describe("resolveSingleReadPaths", () => {
+	it("resolves read paths against requested cwd", () => {
+		const resolved = resolveSingleReadPaths(["context.md", "spec.md"], "/runtime", "/requested");
+		assert.deepEqual(resolved, [
+			path.resolve("/requested", "context.md"),
+			path.resolve("/requested", "spec.md"),
+		]);
+	});
 });
 
 describe("resolveSingleOutputPath", () => {
@@ -38,6 +55,21 @@ describe("resolveSingleOutputPath", () => {
 	});
 });
 
+describe("resolveSingleProgressPath", () => {
+	it("uses progress.md beside the resolved task cwd", () => {
+		const outputPath = resolveSingleOutputPath("plan.md", "/runtime", "/requested");
+		const progressPath = resolveSingleProgressPath(outputPath, "/runtime", "/requested");
+		assert.equal(progressPath, path.resolve("/requested", "progress.md"));
+	});
+});
+
+describe("injectSingleReadInstruction", () => {
+	it("prepends read instruction with resolved paths", () => {
+		const output = injectSingleReadInstruction("Analyze this", ["/tmp/context.md", "/tmp/spec.md"]);
+		assert.match(output, /^\[Read from: \/tmp\/context.md, \/tmp\/spec.md\]/);
+	});
+});
+
 describe("injectSingleOutputInstruction", () => {
 	it("appends output instruction with resolved path", () => {
 		const output = injectSingleOutputInstruction("Analyze this", "/tmp/report.md");
@@ -49,7 +81,7 @@ describe("finalizeSingleOutput", () => {
 	it("persists full output while displaying truncated output", () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-output-test-"));
 		tempDirs.push(dir);
-		const outputPath = path.join(dir, "review.md");
+		const outputPath = path.join(dir, "progress.md");
 		const fullOutput = "line 1\nline 2\nline 3";
 		const truncatedOutput = "[TRUNCATED]\nline 1";
 
@@ -65,10 +97,25 @@ describe("finalizeSingleOutput", () => {
 		assert.equal(fs.readFileSync(outputPath, "utf-8"), fullOutput);
 	});
 
+	it("appends to existing progress output instead of overwriting", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-output-test-"));
+		tempDirs.push(dir);
+		const outputPath = path.join(dir, "progress.md");
+		fs.writeFileSync(outputPath, "existing", "utf-8");
+
+		finalizeSingleOutput({
+			fullOutput: "new output",
+			outputPath,
+			exitCode: 0,
+		});
+
+		assert.equal(fs.readFileSync(outputPath, "utf-8"), "existing\n\n---\n\nnew output");
+	});
+
 	it("does not write output file on failed runs", () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-output-test-"));
 		tempDirs.push(dir);
-		const outputPath = path.join(dir, "review.md");
+		const outputPath = path.join(dir, "progress.md");
 
 		const result = finalizeSingleOutput({
 			fullOutput: "full output",

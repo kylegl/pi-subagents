@@ -16,6 +16,7 @@ export interface RunnerSubagentStep {
 	systemPrompt?: string | null;
 	skills?: string[];
 	outputPath?: string;
+	summaryPath?: string;
 }
 
 /** Parallel step group — multiple agents running concurrently */
