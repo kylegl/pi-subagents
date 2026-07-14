@@ -31,6 +31,7 @@ interface AsyncJobTrackerOptions {
 	assistantMessagePreviews?: boolean;
 }
 
+const ANIMATION_INTERVAL_MS = 80;
 const CONTROL_EVENT_READ_CHUNK_BYTES = 64 * 1024;
 const MAX_CONTROL_EVENT_LINE_BYTES = 1024 * 1024;
 const CONTROL_EVENT_SCAN_WINDOW_BYTES = 2 * 1024 * 1024;
@@ -54,11 +55,13 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	const clockOrigin = monotonicNow();
 	const wallOrigin = wallNow();
 	let animationTimer: ReturnType<typeof setInterval> | undefined;
-	let animationFrame = 0;
 	// Microtasks queued by a prior render must not resurrect timers after shutdown.
 	let generation = 0;
 	let disposed = false;
-	const renderClock = () => ({ frame: animationFrame, nowMs: wallOrigin + Math.max(0, monotonicNow() - clockOrigin) });
+	const renderClock = () => {
+		const elapsedMs = Math.max(0, monotonicNow() - clockOrigin);
+		return { frame: Math.floor(elapsedMs / ANIMATION_INTERVAL_MS), nowMs: wallOrigin + elapsedMs };
+	};
 	const hasVisibleRunning = () => Array.from(state.asyncJobs.values()).some((job) => job.status === "running");
 	const stopAnimation = () => { if (animationTimer) { clearTrackerInterval(animationTimer); animationTimer = undefined; } };
 	const rerenderWidget = (ctx: ExtensionContext, jobs = Array.from(state.asyncJobs.values())) => {
@@ -71,7 +74,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	const reconcileAnimation = () => {
 		if (disposed || !state.lastUiContext?.hasUI || !hasVisibleRunning()) { stopAnimation(); return; }
 		if (animationTimer) return;
-		animationTimer = createInterval(() => { animationFrame++; const ctx = state.lastUiContext; if (ctx?.hasUI && hasVisibleRunning()) rerenderWidget(ctx); else stopAnimation(); }, 80);
+		animationTimer = createInterval(() => { const ctx = state.lastUiContext; if (ctx?.hasUI && hasVisibleRunning()) rerenderWidget(ctx); else stopAnimation(); }, ANIMATION_INTERVAL_MS);
 		animationTimer.unref?.();
 	};
 	const renderCurrentJobs = (ctx?: ExtensionContext) => { if (ctx?.hasUI) state.lastUiContext = ctx; if (state.lastUiContext?.hasUI) rerenderWidget(state.lastUiContext); reconcileAnimation(); };

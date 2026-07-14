@@ -178,6 +178,31 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 		} finally { removeTempDir(asyncRoot); }
 	});
 
+	it("catches animation frames up after a delayed timer callback", async () => {
+		type Timer = { callback: () => void; ms: number; unref(): void };
+		const timers: Timer[] = [];
+		let monotonic = 0;
+		const state = createState();
+		const ui = createUiContext();
+		const tracker = trackerMod!.createAsyncJobTracker(createEventRecorder().pi, state as never, "/tmp/none", {
+			now: () => 10_000,
+			monotonicNow: () => monotonic,
+			setInterval: ((callback: () => void, ms: number) => { const timer: Timer = { callback, ms, unref() {} }; timers.push(timer); return timer; }) as unknown as typeof setInterval,
+			clearInterval: (() => {}) as unknown as typeof clearInterval,
+		});
+		tracker.handleStarted({ id: "run", agent: "worker" });
+		(state.asyncJobs.get("run") as { status: string }).status = "running";
+		tracker.renderCurrentJobs(ui.ctx as never);
+		await Promise.resolve();
+
+		monotonic = 240;
+		timers.find((timer) => timer.ms === 80)!.callback();
+		const widget = ui.widgets.at(-1) as (_tui: unknown, theme: typeof ui.ctx.ui.theme) => { render(width: number): string[] };
+		const text = widget(undefined, ui.ctx.ui.theme).render(180).join("\n");
+		assert.match(text, /background.*⠸ 1/, "240ms elapsed should render frame 3 even when only one timer callback fired");
+		tracker.dispose();
+	});
+
 	it("stops animation and forgets an inactive UI context", async () => {
 		const state = createState();
 		type Timer = { callback: () => void; ms: number; cleared: boolean; unref(): void };
