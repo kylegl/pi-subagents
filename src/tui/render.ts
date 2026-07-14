@@ -1436,15 +1436,94 @@ function asyncExpandedLines(jobs: AsyncJobState[], theme: Theme, width: number):
 	return output;
 }
 
-function buildWidgetComponent(jobs: AsyncJobState[], expanded: boolean): (_tui: unknown, theme: Theme) => Component {
-	return (_tui, theme) => {
-		const width = getTermWidth();
-		const lines = expanded ? asyncExpandedLines(jobs, theme, width) : asyncCompactLines(jobs, theme, width);
-		const container = new Container();
-		for (const line of lines) container.addChild(new Text(line, 1, 0));
-		return container;
-	};
+class AsyncWidgetComponent implements Component {
+	private readonly container = new Container();
+	private readonly lineTexts: Text[] = [];
+	private lineValues: string[] = [];
+	private theme?: Theme;
+	private requestRender?: () => void;
+	private disposed = false;
+	private dirty = true;
+	private lastWidth?: number;
+	private lastExpanded?: boolean;
+	private lastTerminalRows?: number;
+	private jobs: AsyncJobState[];
+	private clock: AsyncRenderClock | undefined;
+	private readonly expanded: () => boolean;
+
+	constructor(jobs: AsyncJobState[], clock: AsyncRenderClock | undefined, expanded: () => boolean) {
+		this.jobs = jobs;
+		this.clock = clock;
+		this.expanded = expanded;
+	}
+
+	update(jobs: AsyncJobState[], clock?: AsyncRenderClock): void {
+		this.jobs = jobs;
+		this.clock = clock;
+		this.dirty = true;
+		this.requestRender?.();
+	}
+
+	attach(tui: { requestRender(): void }, theme: Theme): void {
+		this.theme = theme;
+		this.requestRender = () => tui.requestRender();
+		this.dirty = true;
+	}
+
+	isDisposed(): boolean {
+		return this.disposed;
+	}
+
+	render(width: number): string[] {
+		if (!this.theme) return [];
+		const expanded = this.expanded();
+		const terminalRows = process.stdout.rows;
+		if (this.dirty || this.lastWidth !== width || this.lastExpanded !== expanded || this.lastTerminalRows !== terminalRows) {
+			if (this.clock) { asyncWidgetFrame = this.clock.frame; asyncWidgetNowMs = this.clock.nowMs; }
+			const contentWidth = Math.max(1, width - 2);
+			const lines = expanded
+				? asyncExpandedLines(this.jobs, this.theme, contentWidth)
+				: asyncCompactLines(this.jobs, this.theme, contentWidth);
+			this.updateLines(lines);
+			this.dirty = false;
+			this.lastWidth = width;
+			this.lastExpanded = expanded;
+			this.lastTerminalRows = terminalRows;
+		}
+		return this.container.render(width);
+	}
+
+	invalidate(): void {
+		this.dirty = true;
+		this.container.invalidate();
+		resetWidgetLayoutSession();
+	}
+
+	dispose(): void {
+		this.disposed = true;
+	}
+
+	private updateLines(lines: string[]): void {
+		while (this.lineTexts.length > lines.length) {
+			const text = this.lineTexts.pop();
+			if (text) this.container.removeChild(text);
+		}
+		for (let index = 0; index < lines.length; index++) {
+			const line = lines[index]!;
+			const text = this.lineTexts[index];
+			if (!text) {
+				const next = new Text(line, 1, 0);
+				this.lineTexts.push(next);
+				this.container.addChild(next);
+			} else if (this.lineValues[index] !== line) {
+				text.setText(line);
+			}
+		}
+		this.lineValues = lines;
+	}
 }
+
+const asyncWidgetComponents = new WeakMap<object, AsyncWidgetComponent>();
 
 export function buildWidgetLines(jobs: AsyncJobState[], theme: Theme, width = getTermWidth(), expanded = false): string[] {
 	if (jobs.length === 0) return [];
@@ -1455,14 +1534,27 @@ export function buildWidgetLines(jobs: AsyncJobState[], theme: Theme, width = ge
  * Render the async jobs widget
  */
 export function renderWidget(ctx: ExtensionContext, jobs: AsyncJobState[], clock?: AsyncRenderClock): void {
-	if (clock) { asyncWidgetFrame = clock.frame; asyncWidgetNowMs = clock.nowMs; }
 	if (jobs.length === 0) {
 		resetWidgetLayoutSession();
-		if (ctx.hasUI) ctx.ui.setWidget(WIDGET_KEY, undefined);
+		if (ctx.hasUI) {
+			asyncWidgetComponents.delete(ctx.ui as object);
+			ctx.ui.setWidget(WIDGET_KEY, undefined);
+		}
 		return;
 	}
 	if (!ctx.hasUI) return;
-	ctx.ui.setWidget(WIDGET_KEY, buildWidgetComponent(jobs, ctx.ui.getToolsExpanded?.() ?? false));
+	const key = ctx.ui as object;
+	const existing = asyncWidgetComponents.get(key);
+	if (existing && !existing.isDisposed()) {
+		existing.update(jobs, clock);
+		return;
+	}
+	const component = new AsyncWidgetComponent(jobs, clock, () => ctx.ui.getToolsExpanded?.() ?? false);
+	asyncWidgetComponents.set(key, component);
+	ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => {
+		component.attach(tui, theme);
+		return component;
+	});
 }
 
 function renderSingleCompact(d: Details, r: Details["results"][number], theme: Theme, frame?: number): Component {

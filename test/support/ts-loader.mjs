@@ -36,6 +36,12 @@ export class Text {
     this.text = text;
   }
 
+  setText(text) {
+    this.text = text;
+  }
+
+  invalidate() {}
+
   render(width) {
     return wrapText(this.text, width);
   }
@@ -68,6 +74,14 @@ export class Container {
 
   addChild(child) {
     this.children.push(child);
+  }
+
+  removeChild(child) {
+    this.children = this.children.filter((candidate) => candidate !== child);
+  }
+
+  invalidate() {
+    for (const child of this.children) child.invalidate?.();
   }
 
   render(width) {

@@ -26,18 +26,44 @@ describe("subagent async widget rendering", () => {
 		assert.doesNotMatch(lines, /\x1b/);
 	});
 
-	it("uses render clock frames only, with stable root-qualified child phase offsets", () => {
-		const ui = { hasUI: true, ui: { theme, setWidget: (_key: string, value: unknown) => { (ui as { widget?: unknown }).widget = value; }, requestRender: () => undefined } };
+	it("retains one widget component while render clock frames and job state change", () => {
+		let setWidgetCalls = 0;
+		let renderRequests = 0;
+		const tui = { requestRender: () => { renderRequests++; } };
+		const ui = { hasUI: true, ui: { theme, setWidget: (_key: string, value: unknown) => { setWidgetCalls++; renderRequests++; (ui as { widget?: unknown }).widget = typeof value === "function" ? value(tui, theme) : value; } } };
 		const input = [job([{ index: 0, agent: "one", status: "running", currentTool: "read", currentToolStartedAt: 1 }, { index: 1, agent: "two", status: "running", currentTool: "read", currentToolStartedAt: 999_999 }])];
 		renderWidget(ui, input, { frame: 2, nowMs: 2_000 });
-		const component = (ui as { widget: (tui: unknown, t: typeof theme) => { render(width: number): string[] } }).widget;
-		const first = component(undefined, theme).render(180).join("\n");
+		const component = (ui as { widget: { render(width: number): string[] } }).widget;
+		const first = component.render(180).join("\n");
 		renderWidget(ui, [{ ...input[0]!, steps: [{ index: 0, agent: "one", status: "running", currentTool: "read", currentToolStartedAt: 2 }, { index: 1, agent: "two", status: "running", currentTool: "read", currentToolStartedAt: 3, toolCount: 99 }] }], { frame: 2, nowMs: 2_000 });
-		const same = (ui as { widget: (tui: unknown, t: typeof theme) => { render(width: number): string[] } }).widget(undefined, theme).render(180).join("\n");
+		const same = (ui as { widget: { render(width: number): string[] } }).widget.render(180).join("\n");
 		assert.deepEqual(first.match(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g)?.slice(1), same.match(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g)?.slice(1));
 		renderWidget(ui, input, { frame: 3, nowMs: 2_080 });
-		const next = (ui as { widget: (tui: unknown, t: typeof theme) => { render(width: number): string[] } }).widget(undefined, theme).render(180).join("\n");
+		const next = (ui as { widget: { render(width: number): string[] } }).widget.render(180).join("\n");
 		assert.notEqual(first, next);
+		assert.equal(setWidgetCalls, 1, "clock and job updates should retain the installed widget component");
+		assert.equal(renderRequests, 3, "initial installation and retained updates should each schedule a render");
+	});
+
+	it("clears, reinstalls, and isolates persistent widgets by UI context", () => {
+		const createUi = () => {
+			const calls: unknown[] = [];
+			const ui = { hasUI: true, ui: { theme, setWidget: (_key: string, value: unknown) => { calls.push(value); } } };
+			return { ui, calls };
+		};
+		const first = createUi();
+		const second = createUi();
+		const input = [job([{ agent: "worker", status: "running" }])];
+		renderWidget(first.ui, input, { frame: 0, nowMs: 1_000 });
+		renderWidget(first.ui, input, { frame: 1, nowMs: 1_080 });
+		renderWidget(second.ui, input, { frame: 0, nowMs: 1_000 });
+		assert.equal(first.calls.length, 1);
+		assert.equal(second.calls.length, 1);
+
+		renderWidget(first.ui, [], { frame: 1, nowMs: 1_080 });
+		renderWidget(first.ui, input, { frame: 2, nowMs: 1_160 });
+		assert.equal(first.calls.length, 3);
+		assert.equal(first.calls[1], undefined);
 	});
 
 	it("renders bounded ordered expanded sections without legacy output and preserves failures in timeline", () => {

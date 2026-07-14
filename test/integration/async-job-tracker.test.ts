@@ -86,17 +86,16 @@ async function waitForCondition(
 function createUiContext() {
 	const widgets: unknown[] = [];
 	let renderRequests = 0;
+	const theme = { fg: (_theme: string, text: string) => text };
+	const tui = { requestRender: () => { renderRequests += 1; } };
 	const ctx = {
 		hasUI: true,
 		ui: {
-			theme: {
-				fg: (_theme: string, text: string) => text,
-			},
+			theme,
 			setWidget: (_key: string, value: unknown) => {
 				widgets.push(value);
-			},
-			requestRender: () => {
 				renderRequests += 1;
+				if (typeof value === "function") value(tui, theme);
 			},
 		},
 	};
@@ -156,6 +155,7 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 			assert.equal(timers.filter((timer) => timer.ms === 80).length, 1, "repeated renders share one animation interval");
 			const animation = timers.find((timer) => timer.ms === 80)!;
 			const requestsBefore = ui.renderRequests;
+			const widgetsBefore = ui.widgets.length;
 			// Measure a full second of a static persisted snapshot: only the
 			// tracker-owned render clock advances, with no status write.
 			for (let tick = 1; tick <= 13; tick++) {
@@ -163,6 +163,7 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 				animation.callback();
 			}
 			assert.ok(ui.renderRequests >= requestsBefore + 13);
+			assert.equal(ui.widgets.length, widgetsBefore, "animation ticks must retain the installed widget component");
 			assert.deepEqual({ text: fs.readFileSync(statusPath, "utf8"), mtime: fs.statSync(statusPath).mtimeMs }, before, "one second of animation must not write status");
 			tracker.handleComplete({ id: "run", success: true });
 			await Promise.resolve();
@@ -285,8 +286,12 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 			state.currentSessionId = "session-restored";
 			const ui = createUiContext();
 			const recorder = createEventRecorder();
+			type Timer = { callback: () => void; ms: number; cleared: boolean; unref(): void };
+			const timers: Timer[] = [];
 			const tracker = trackerMod!.createAsyncJobTracker(recorder.pi, state as never, asyncRoot, {
 				pollIntervalMs: 10,
+				setInterval: ((callback: () => void, ms: number) => { const timer: Timer = { callback, ms, cleared: false, unref() {} }; timers.push(timer); return timer; }) as unknown as typeof setInterval,
+				clearInterval: ((timer: Timer) => { timer.cleared = true; }) as unknown as typeof clearInterval,
 			});
 			tracker.resetJobs(ui.ctx as never);
 			tracker.restoreActiveJobs(ui.ctx as never);
@@ -304,9 +309,14 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 			assert.ok(state.poller, "expected restored active jobs to start polling");
 			assert.ok(ui.renderRequests >= 2, "expected reset and restore to request widget renders");
 			assert.equal(typeof ui.widgets.at(-1), "function", "expected restored jobs to render the widget");
-
-			await new Promise((resolve) => setTimeout(resolve, 30));
+			await Promise.resolve();
+			const animation = timers.find((timer) => timer.ms === 80 && !timer.cleared);
+			assert.ok(animation, "restored running jobs should restart widget animation");
+			const requestsBeforeTick = ui.renderRequests;
+			animation.callback();
+			assert.ok(ui.renderRequests > requestsBeforeTick, "restored animation ticks should request a TUI render without keyboard input");
 			assert.equal(recorder.events.length, 0, "historical control events should not be replayed during restore");
+			tracker.dispose();
 		} finally {
 			removeTempDir(asyncRoot);
 		}

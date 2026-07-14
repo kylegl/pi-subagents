@@ -66,7 +66,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	const stopAnimation = () => { if (animationTimer) { clearTrackerInterval(animationTimer); animationTimer = undefined; } };
 	const rerenderWidget = (ctx: ExtensionContext, jobs = Array.from(state.asyncJobs.values())) => {
 		if (disposed) return;
-		try { renderWidget(ctx, jobs, renderClock()); ctx.ui.requestRender?.(); }
+		try { renderWidget(ctx, jobs, renderClock()); }
 		catch (error) { if (error instanceof Error && error.message.includes("Extension context no longer active")) { if (state.lastUiContext === ctx) state.lastUiContext = undefined; stopAnimation(); return; } throw error; }
 		const renderGeneration = generation;
 		queueMicrotask(() => { if (!disposed && renderGeneration === generation) reconcileAnimation(); });
