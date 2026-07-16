@@ -199,8 +199,8 @@ describe("skills filesystem fallback", () => {
 		assert.deepEqual(missing, []);
 
 		const injection = buildSkillInjection(resolved);
-		assert.match(injection, /The following configured skills are available to this subagent/);
-		assert.match(injection, /Use the read tool to load a skill's file/);
+		assert.match(injection, /The following skills are supplied\/configured for this run/);
+		assert.match(injection, /Before task work, use the read tool to load every skill file listed below/);
 		assert.match(injection, /<available_skills>/);
 		assert.match(injection, /<name>lazy-skill<\/name>/);
 		assert.match(injection, /<description>Test description<\/description>/);

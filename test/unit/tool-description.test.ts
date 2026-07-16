@@ -58,6 +58,16 @@ describe("registered subagent tool description", () => {
 		assert.match(description, /events\.jsonl/);
 	});
 
+	it("routes task-specific skills to children without loading them in the parent", () => {
+		for (const description of [FULL_SUBAGENT_TOOL_DESCRIPTION, COMPACT_SUBAGENT_TOOL_DESCRIPTION]) {
+			assert.match(description, /SINGLE:? \{ ?agent, ?task\?, ?skill\? ?\}/);
+			assert.match(description, /tasks:\s*\[\{agent,task,skill\?,count\?/);
+			assert.match(description, /do not read\/load that skill in the parent; pass it through execution skill for the child to load/i);
+			assert.match(description, /parent is responsible for loading orchestration\/supervision-only skills needed to delegate\/supervise/i);
+			assert.match(description, /must never forward them to ordinary children/i);
+		}
+	});
+
 	it("offers a compact mode that keeps safety-critical guidance", () => {
 		const description = buildSubagentToolDescription({ toolDescriptionMode: "compact" });
 
@@ -102,6 +112,8 @@ describe("registered subagent tool description", () => {
 		assert.match(description, new RegExp(escapeRegex(agentDir)));
 		assert.match(description, new RegExp(escapeRegex(projectConfigDir)));
 		assert.match(description, /SAFETY-CRITICAL SUBAGENT GUIDANCE/);
+		assert.match(description, /do not read\/load that skill in the parent; pass it through execution skill for the child to load/i);
+		assert.match(description, /parent loads orchestration\/supervision-only skills needed to delegate\/supervise and must never forward them to ordinary children/i);
 		assert.equal(warnings.length, 0);
 	});
 

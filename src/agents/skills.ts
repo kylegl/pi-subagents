@@ -668,8 +668,8 @@ export function buildSkillInjection(skills: ResolvedSkill[]): string {
 	if (skills.length === 0) return "";
 
 	const lines = [
-		"The following configured skills are available to this subagent.",
-		"Use the read tool to load a skill's file when the task matches its description.",
+		"The following skills are supplied/configured for this run.",
+		"Before task work, use the read tool to load every skill file listed below.",
 		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
 		"",
 		"<available_skills>",
