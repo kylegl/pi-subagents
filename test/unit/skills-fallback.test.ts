@@ -200,13 +200,26 @@ describe("skills filesystem fallback", () => {
 
 		const injection = buildSkillInjection(resolved);
 		assert.match(injection, /The following configured skills are available to this subagent/);
-		assert.match(injection, /Use the read tool to load a skill's file/);
+		assert.match(injection, /Use the read tool to load a skill's file when the task matches its description/);
+		assert.match(injection, /explicitly routed for this run.*load every required skill file/i);
 		assert.match(injection, /<available_skills>/);
+		assert.match(injection, /<skill required="false">/);
 		assert.match(injection, /<name>lazy-skill<\/name>/);
 		assert.match(injection, /<description>Test description<\/description>/);
 		assert.match(injection, /<location>.*lazy-skill.*SKILL\.md<\/location>/);
 		assert.doesNotMatch(injection, /This body should stay out/);
 		assert.doesNotMatch(injection, /<skill name=/);
+	});
+
+	it("marks only explicitly routed skills mandatory and injects overlap once", () => {
+		makeProjectSkill(tempDir, "default-skill", "Default body.");
+		makeProjectSkill(tempDir, "overlap", "Overlap body.");
+		const { resolved } = resolveSkills(["default-skill", "overlap", "overlap"], tempDir);
+
+		const injection = buildSkillInjection(resolved, ["overlap"]);
+		assert.match(injection, /<skill required="false">\s*<name>default-skill<\/name>/);
+		assert.match(injection, /<skill required="true">\s*<name>overlap<\/name>/);
+		assert.equal((injection.match(/<name>overlap<\/name>/g) ?? []).length, 1);
 	});
 
 	it("escapes XML-sensitive skill metadata in lazy references", () => {

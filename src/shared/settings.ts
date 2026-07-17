@@ -20,6 +20,8 @@ export interface ResolvedStepBehavior {
 	reads: string[] | false;
 	progress: boolean;
 	skills: string[] | false;
+	/** Skills explicitly routed via a run/task/step skill parameter. */
+	mandatorySkills: string[];
 	model?: string;
 }
 
@@ -253,23 +255,21 @@ export function resolveStepBehavior(
 			: agentConfig.defaultProgress ?? false;
 
 	let skills: string[] | false;
+	let mandatorySkills: string[];
 	if (stepOverrides.skills === false) {
 		skills = false;
+		mandatorySkills = [];
 	} else if (stepOverrides.skills !== undefined) {
-		skills = [...stepOverrides.skills];
-		if (chainSkills && chainSkills.length > 0) {
-			skills = [...new Set([...skills, ...chainSkills])];
-		}
+		mandatorySkills = [...new Set([...stepOverrides.skills, ...(chainSkills ?? [])])];
+		skills = [...mandatorySkills];
 	} else {
-		skills = agentConfig.skills ? [...agentConfig.skills] : [];
-		if (chainSkills && chainSkills.length > 0) {
-			skills = [...new Set([...skills, ...chainSkills])];
-		}
+		mandatorySkills = [...new Set(chainSkills ?? [])];
+		skills = [...new Set([...(agentConfig.skills ?? []), ...mandatorySkills])];
 	}
 
 	const outputMode = stepOverrides.outputMode ?? "inline";
 	const model = stepOverrides.model ?? agentConfig.model;
-	return { output, outputMode, reads, progress, skills, model };
+	return { output, outputMode, reads, progress, skills, mandatorySkills, model };
 }
 
 export function resolveTaskTextForFileUpdatePolicy(task: string | undefined, originalTask?: string): string | undefined {
@@ -411,23 +411,21 @@ export function resolveParallelBehaviors(
 
 		const taskSkillInput = normalizeSkillInput(task.skill);
 		let skills: string[] | false;
+		let mandatorySkills: string[];
 		if (taskSkillInput === false) {
 			skills = false;
+			mandatorySkills = [];
 		} else if (taskSkillInput !== undefined) {
-			skills = [...taskSkillInput];
-			if (chainSkills && chainSkills.length > 0) {
-				skills = [...new Set([...skills, ...chainSkills])];
-			}
+			mandatorySkills = [...new Set([...taskSkillInput, ...(chainSkills ?? [])])];
+			skills = [...mandatorySkills];
 		} else {
-			skills = config.skills ? [...config.skills] : [];
-			if (chainSkills && chainSkills.length > 0) {
-				skills = [...new Set([...skills, ...chainSkills])];
-			}
+			mandatorySkills = [...new Set(chainSkills ?? [])];
+			skills = [...new Set([...(config.skills ?? []), ...mandatorySkills])];
 		}
 
 		const outputMode = task.outputMode ?? "inline";
 		const model = task.model ?? config.model;
-		return { output, outputMode, reads, progress, skills, model };
+		return { output, outputMode, reads, progress, skills, mandatorySkills, model };
 	});
 }
 

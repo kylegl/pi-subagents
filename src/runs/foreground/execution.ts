@@ -1213,7 +1213,7 @@ export async function runSync(
 	}
 	let systemPrompt = agent.systemPrompt?.trim() || "";
 	if (resolvedSkills.length > 0) {
-		const skillInjection = buildSkillInjection(resolvedSkills);
+		const skillInjection = buildSkillInjection(resolvedSkills, options.mandatorySkills);
 		systemPrompt = systemPrompt ? `${systemPrompt}\n\n${skillInjection}` : skillInjection;
 	}
 	const memoryInjection = buildAgentMemoryInjection(agent, skillCwd);

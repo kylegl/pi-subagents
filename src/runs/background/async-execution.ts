@@ -171,6 +171,7 @@ interface AsyncSingleParams {
 	sessionFile?: string;
 	revivalLease?: SessionLeaseRequest;
 	skills?: string[];
+	mandatorySkills?: string[];
 	output?: string | boolean;
 	outputMode?: "inline" | "file-only";
 	outputBaseDir?: string;
@@ -591,7 +592,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 
 		let systemPrompt = a.systemPrompt?.trim() ?? "";
 		if (resolvedSkills.length > 0) {
-			const injection = buildSkillInjection(resolvedSkills);
+			const injection = buildSkillInjection(resolvedSkills, behavior.mandatorySkills);
 			systemPrompt = systemPrompt ? `${systemPrompt}\n\n${injection}` : injection;
 		}
 		const memoryInjection = buildAgentMemoryInjection(a, stepCwd);
@@ -1077,7 +1078,7 @@ export function executeAsyncSingle(
 	if (missingSkills.includes("pi-subagents")) return formatAsyncStartError("single", UNAVAILABLE_SUBAGENT_SKILL_ERROR);
 	let systemPrompt = agentConfig.systemPrompt?.trim() ?? "";
 	if (resolvedSkills.length > 0) {
-		const injection = buildSkillInjection(resolvedSkills);
+		const injection = buildSkillInjection(resolvedSkills, params.mandatorySkills);
 		systemPrompt = systemPrompt ? `${systemPrompt}\n\n${injection}` : injection;
 	}
 	const memoryInjection = buildAgentMemoryInjection(agentConfig, runnerCwd);

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
+import { clearSkillCache } from "../../src/agents/skills.ts";
 import { buildAsyncRunnerSteps, formatAsyncStartedMessage, resolveAsyncRunnerLogPaths } from "../../src/runs/background/async-execution.ts";
 import type { AgentConfig } from "../../src/agents/agents.ts";
 
@@ -82,6 +85,37 @@ describe("async runner execution", () => {
 
 		assert.ok("steps" in result, "expected successful step build");
 		assert.deepEqual(result.steps[0]?.toolBudget, { hard: 4, block: ["read"] });
+	});
+
+	it("carries routed skill provenance into async chain prompts", () => {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-async-skills-"));
+		try {
+			for (const name of ["default-skill", "overlap", "run-skill"]) {
+				const dir = path.join(cwd, ".pi", "skills", name);
+				fs.mkdirSync(dir, { recursive: true });
+				fs.writeFileSync(path.join(dir, "SKILL.md"), `---\ndescription: ${name}\n---\nbody`);
+			}
+			clearSkillCache();
+			const configuredAgent = { ...agent("worker"), filePath: undefined, skills: ["default-skill", "overlap"] };
+			const result = buildAsyncRunnerSteps("run-skills", {
+				chain: [{ agent: "worker", task: "work" }],
+				agents: [configuredAgent],
+				ctx: { ...ctx, cwd },
+				asyncDir: path.join(cwd, ".tmp-async-test"),
+				chainSkills: ["overlap", "run-skill"],
+				maxSubagentDepth: 2,
+			});
+
+			assert.ok("steps" in result, "expected successful step build");
+			const prompt = result.steps[0]?.systemPrompt ?? "";
+			assert.match(prompt, /<skill required="false">\s*<name>default-skill<\/name>/);
+			assert.match(prompt, /<skill required="true">\s*<name>overlap<\/name>/);
+			assert.match(prompt, /<skill required="true">\s*<name>run-skill<\/name>/);
+			assert.equal((prompt.match(/<name>overlap<\/name>/g) ?? []).length, 1);
+		} finally {
+			clearSkillCache();
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 
 	it("uses config default when no step, run, or agent budget exists", () => {

@@ -1129,6 +1129,8 @@ export interface RunSyncOptions {
 	modelScope?: ModelScopeConfig;
 	/** Skills to make available (overrides agent default if provided) */
 	skills?: string[];
+	/** Subset of skills explicitly routed for this invocation and mandatory to load. */
+	mandatorySkills?: string[];
 	structuredOutput?: {
 		schema: JsonSchemaObject;
 		schemaPath: string;

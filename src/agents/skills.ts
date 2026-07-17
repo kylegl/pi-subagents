@@ -666,18 +666,21 @@ export function resolveSkillsWithFallback(
 	};
 }
 
-export function buildSkillInjection(skills: ResolvedSkill[]): string {
+export function buildSkillInjection(skills: ResolvedSkill[], mandatorySkillNames: string[] = []): string {
 	if (skills.length === 0) return "";
 
+	const mandatory = new Set(mandatorySkillNames);
+	const uniqueSkills = [...new Map(skills.map((skill) => [skill.name, skill])).values()];
 	const lines = [
 		"The following configured skills are available to this subagent.",
 		"Use the read tool to load a skill's file when the task matches its description.",
+		"Skills marked required were explicitly routed for this run. Before task work, use the read tool to load every required skill file.",
 		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
 		"",
 		"<available_skills>",
 	];
-	for (const skill of skills) {
-		lines.push("  <skill>");
+	for (const skill of uniqueSkills) {
+		lines.push(`  <skill required="${mandatory.has(skill.name) ? "true" : "false"}">`);
 		lines.push(`    <name>${escapeXmlText(skill.name)}</name>`);
 		lines.push(`    <description>${escapeXmlText(skill.description ?? "")}</description>`);
 		lines.push(`    <location>${escapeXmlText(skill.path)}</location>`);

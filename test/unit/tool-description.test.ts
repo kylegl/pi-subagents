@@ -38,7 +38,10 @@ describe("registered subagent tool description", () => {
 		assert.match(description, /executable\/non-disabled/i);
 		assert.match(description, /proactive skill subagent suggestions/i);
 		assert.doesNotMatch(description, /disabled builtins/i);
-		assert.match(description, /output\?,reads\?,progress\?/i);
+		assert.match(description, /SINGLE: \{ agent, task\?, skill\? \}/);
+		assert.match(description, /tasks: \[\{agent,task,skill\?,count\?,output\?,reads\?,progress\?\}/);
+		assert.match(description, /task-specific skills.*execution skill.*do not load them in the parent/i);
+		assert.match(description, /Parent-only orchestration\/supervision skills.*must not be forwarded/i);
 		assert.match(description, /timeoutMs/i);
 		assert.match(description, /maxRuntimeMs/i);
 		assert.match(description, /foreground and async\/background runs/i);
@@ -89,6 +92,10 @@ describe("registered subagent tool description", () => {
 		assert.match(description, /SINGLE/);
 		assert.match(description, /PARALLEL/);
 		assert.match(description, /CHAIN/);
+		assert.match(description, /SINGLE \{agent, task\?, skill\?\}/);
+		assert.match(description, /tasks:\[\{agent,task,skill\?,count\?,output\?,reads\?,progress\?\}\]/);
+		assert.match(description, /task-specific skills.*execution skill.*do not load them in the parent/i);
+		assert.match(description, /Parent-only orchestration\/supervision skills.*must not be forwarded/i);
 		assert.match(description, /action without execution fields/i);
 		assert.match(description, /subagent_wait/i);
 		assert.match(description, /interactive session.*normally return control/i);
