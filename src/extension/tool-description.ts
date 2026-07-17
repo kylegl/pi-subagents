@@ -10,6 +10,7 @@ export const SUBAGENT_SAFETY_GUIDANCE = `SAFETY-CRITICAL SUBAGENT GUIDANCE:
 • Use { action: "list" } before execution and only run executable/non-disabled agents.
 • Keep execution and management separate: omit action for single-child and workflowScript execution; use action only for management/control.
 • Async/background runs are the default. Use async:false only when a blocking foreground result is needed. Do not sleep or poll status just to wait; use subagent_wait only when the current request must finish in this turn.
+• Skills passed explicitly through the execution skill parameter are mandatory for that child to load before task work.
 • Ordinary child subagents are not orchestrators. Only explicitly configured fanout children may use the child-safe subagent tool, still bounded by depth/session limits.
 • Keep one writer for the same cwd/worktree. Use fresh-context read-only reviewers for independent review, then have the parent synthesize and apply fixes.
 • Async runs expose asyncId/asyncDir with status.json, events.jsonl, output logs, and status via { action: "status", id }. Include output paths and residual risks when reporting results.`;
@@ -40,6 +41,7 @@ EXECUTE:
 • Call { action:"list" } first and use only executable/non-disabled agents.
 • SINGLE {agent, task?}; SCRIPT {workflowScript:"..."} with stable-key runs.run for one child and runs.all for parallel work. Use JavaScript for sequence, branching, retries, and aggregation. For repository mutation lanes, use worktree:true on a direct single child or runs.run/runs.all item for managed isolation instead of manual Git worktrees. Scripts start async by default; async:false is the foreground escape hatch and auto-enables a same-repo live chat card unless chatProgress is off/terminal/milestones.
 • Example: {workflowScript:"const [a,b]=await runs.all([{key:'a',agent:'agent-a',task:'Implement A',worktree:true},{key:'b',agent:'agent-b',task:'Implement B',worktree:true}]); return [a.output,b.output]"}
+• Skills passed explicitly through skill are mandatory for the child to load before task work.
 • context can be fresh or fork. timeoutMs/maxRuntimeMs apply to foreground and async runs. Omit acceptance for reviewer/read-only calls.
 
 MANAGE / CONTROL:
