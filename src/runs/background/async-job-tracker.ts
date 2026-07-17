@@ -28,8 +28,12 @@ interface AsyncJobTrackerOptions {
 	widgetEnabled?: boolean;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 	now?: () => number;
+	monotonicNow?: () => number;
+	setInterval?: typeof setInterval;
+	clearInterval?: typeof clearInterval;
 }
 
+const ANIMATION_INTERVAL_MS = 80;
 const CONTROL_EVENT_READ_CHUNK_BYTES = 64 * 1024;
 const MAX_CONTROL_EVENT_LINE_BYTES = 1024 * 1024;
 const CONTROL_EVENT_SCAN_WINDOW_BYTES = 2 * 1024 * 1024;
@@ -51,16 +55,64 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	handleComplete: (data: unknown) => void;
 	resetJobs: (ctx?: ExtensionContext) => void;
 	restoreActiveJobs: (ctx?: ExtensionContext) => void;
+	dispose: () => void;
 } {
 	const completionRetentionMs = options.completionRetentionMs ?? 10000;
 	const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
 	const resultsDir = options.resultsDir ?? RESULTS_DIR;
+	const createInterval = options.setInterval ?? setInterval;
+	const clearTrackerInterval = options.clearInterval ?? clearInterval;
+	const monotonicNow = options.monotonicNow ?? (() => performance.now());
+	const wallNow = options.now ?? Date.now;
+	const clockOrigin = monotonicNow();
+	const wallOrigin = wallNow();
 	const steeringNoticeSeen = new Map<string, number>();
-	const rerenderWidget = (ctx: ExtensionContext, jobs = Array.from(state.asyncJobs.values())) => {
-		renderWidget(ctx, options.widgetEnabled === false ? [] : jobs);
-		ctx.ui.requestRender?.();
+	let animationTimer: ReturnType<typeof setInterval> | undefined;
+	let disposed = false;
+	const renderClock = () => {
+		const elapsedMs = Math.max(0, monotonicNow() - clockOrigin);
+		return { frame: Math.floor(elapsedMs / ANIMATION_INTERVAL_MS), nowMs: wallOrigin + elapsedMs };
 	};
-	const refreshWidget = (ctx: ExtensionContext) => rerenderWidget(ctx);
+	const hasAnimatableWork = () => options.widgetEnabled !== false
+		&& Array.from(state.asyncJobs.values()).some((job) => job.status === "running");
+	const stopAnimation = () => {
+		if (!animationTimer) return;
+		clearTrackerInterval(animationTimer);
+		animationTimer = undefined;
+	};
+	const reconcileAnimation = () => {
+		if (disposed || !state.lastUiContext?.hasUI || !hasAnimatableWork()) {
+			stopAnimation();
+			return;
+		}
+		if (animationTimer) return;
+		animationTimer = createInterval(() => {
+			const ctx = state.lastUiContext;
+			if (ctx?.hasUI && hasAnimatableWork()) rerenderWidget(ctx);
+			else stopAnimation();
+		}, ANIMATION_INTERVAL_MS);
+		animationTimer.unref?.();
+	};
+	const rerenderWidget = (ctx: ExtensionContext, jobs = Array.from(state.asyncJobs.values())) => {
+		if (disposed) return;
+		try {
+			renderWidget(ctx, options.widgetEnabled === false ? [] : jobs, renderClock());
+			ctx.ui.requestRender?.();
+		} catch (error) {
+			if (error instanceof Error && error.message.includes("Extension context no longer active")) {
+				if (state.lastUiContext === ctx) state.lastUiContext = undefined;
+				stopAnimation();
+				return;
+			}
+			throw error;
+		}
+		queueMicrotask(reconcileAnimation);
+	};
+	const refreshWidget = (ctx: ExtensionContext) => {
+		if (ctx.hasUI) state.lastUiContext = ctx;
+		rerenderWidget(ctx);
+		reconcileAnimation();
+	};
 	const restoredControlEventCursor = (asyncDir: string) => {
 		try {
 			return fs.statSync(path.join(asyncDir, "events.jsonl")).size;
@@ -74,9 +126,9 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 		const activeGroup = run.currentStep !== undefined
 			? groups.find((group) => run.currentStep! >= group.start && run.currentStep! < group.start + group.count)
 			: undefined;
-		const visibleSteps = activeGroup
-			? run.steps.slice(activeGroup.start, activeGroup.start + activeGroup.count).map((step, index) => ({ ...step, index: activeGroup.start + index }))
-			: run.steps.map((step, index) => ({ ...step, index }));
+		// Keep the complete workflow projection so active parallel groups retain
+		// completed and pending siblings instead of narrowing to only the group.
+		const visibleSteps = run.steps.map((step, index) => ({ ...step, index }));
 		return {
 			asyncId: run.id,
 			asyncDir: run.asyncDir,
@@ -250,11 +302,11 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 
 	const ensurePoller = () => {
 		if (state.poller) return;
-		state.poller = setInterval(() => {
+		state.poller = createInterval(() => {
 			if (state.asyncJobs.size === 0) {
 				if (state.lastUiContext?.hasUI) rerenderWidget(state.lastUiContext, []);
 				if (state.poller) {
-					clearInterval(state.poller);
+					clearTrackerInterval(state.poller);
 					state.poller = null;
 				}
 				return;
@@ -326,9 +378,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 							const activeGroup = status.currentStep !== undefined
 								? groups.find((group) => status.currentStep! >= group.start && status.currentStep! < group.start + group.count)
 								: undefined;
-							const visibleSteps = activeGroup
-								? status.steps.slice(activeGroup.start, activeGroup.start + activeGroup.count).map((step, index) => ({ ...step, index: activeGroup.start + index }))
-								: status.steps.map((step, index) => ({ ...step, index }));
+							const visibleSteps = status.steps.map((step, index) => ({ ...step, index }));
 							job.activeParallelGroup = Boolean(activeGroup);
 							job.agents = visibleSteps.map((step) => step.agent);
 							job.steps = visibleSteps;
@@ -449,6 +499,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	};
 
 	const resetJobs = (ctx?: ExtensionContext) => {
+		stopAnimation();
 		for (const timer of state.cleanupTimers.values()) {
 			clearTimeout(timer);
 		}
@@ -484,5 +535,21 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 		if (state.lastUiContext?.hasUI) rerenderWidget(state.lastUiContext);
 	};
 
-	return { ensurePoller, refreshWidget, handleStarted, handleComplete, resetJobs, restoreActiveJobs };
+	const dispose = () => {
+		disposed = true;
+		stopAnimation();
+		if (state.poller) {
+			clearTrackerInterval(state.poller);
+			state.poller = null;
+		}
+		for (const timer of state.cleanupTimers.values()) clearTimeout(timer);
+		state.cleanupTimers.clear();
+		try {
+			if (state.lastUiContext?.hasUI) renderWidget(state.lastUiContext, []);
+		} catch (error) {
+			if (!(error instanceof Error && error.message.includes("Extension context no longer active"))) throw error;
+		}
+	};
+
+	return { ensurePoller, refreshWidget, handleStarted, handleComplete, resetJobs, restoreActiveJobs, dispose };
 }

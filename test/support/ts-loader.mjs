@@ -36,6 +36,10 @@ export class Text {
     this.text = text;
   }
 
+  setText(text) {
+    this.text = text;
+  }
+
   render(width) {
     return wrapText(this.text, width);
   }
@@ -69,6 +73,17 @@ export class Container {
   addChild(child) {
     this.children.push(child);
   }
+
+  removeChild(child) {
+    const index = this.children.indexOf(child);
+    if (index >= 0) this.children.splice(index, 1);
+  }
+
+  clear() {
+    this.children = [];
+  }
+
+  invalidate() {}
 
   render(width) {
     return this.children.flatMap((child) => child.render(width));

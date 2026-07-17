@@ -16,13 +16,18 @@ interface AsyncJobTrackerModule {
 			widgetEnabled?: boolean;
 			kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 			now?: () => number;
+			monotonicNow?: () => number;
+			setInterval?: typeof setInterval;
+			clearInterval?: typeof clearInterval;
 		},
 	): {
 		ensurePoller(): void;
+		refreshWidget(ctx: unknown): void;
 		resetJobs(ctx?: unknown): void;
 		restoreActiveJobs(ctx?: unknown): void;
 		handleStarted(data: unknown): void;
 		handleComplete(data: unknown): void;
+		dispose(): void;
 	};
 }
 
@@ -109,6 +114,32 @@ function createUiContext() {
 }
 
 describe("async job tracker", { skip: !available ? "pi packages not available" : undefined }, () => {
+	it("owns one elapsed-time animation timer and disposes it", async () => {
+		type Timer = { callback: () => void; ms: number; cleared: boolean; unref(): void };
+		const timers: Timer[] = [];
+		let monotonic = 0;
+		const state = createState();
+		const ui = createUiContext();
+		const tracker = trackerMod!.createAsyncJobTracker(createEventRecorder().pi, state as never, "/tmp/none", {
+			now: () => 10_000,
+			monotonicNow: () => monotonic,
+			setInterval: ((callback: () => void, ms: number) => { const timer: Timer = { callback, ms, cleared: false, unref() {} }; timers.push(timer); return timer; }) as unknown as typeof setInterval,
+			clearInterval: ((timer: Timer) => { timer.cleared = true; }) as unknown as typeof clearInterval,
+		});
+		tracker.handleStarted({ id: "run", agent: "worker" });
+		(state.asyncJobs.get("run") as { status: string }).status = "running";
+		tracker.refreshWidget(ui.ctx);
+		await Promise.resolve();
+		const animation = timers.find((timer) => timer.ms === 80)!;
+		assert.ok(animation);
+		const installs = ui.widgets.length;
+		monotonic = 240;
+		animation.callback();
+		assert.equal(ui.widgets.length, installs, "ticks retain the installed component");
+		tracker.dispose();
+		assert.equal(animation.cleared, true);
+	});
+
 	it("removes completed jobs after retention and requests a rerender", async () => {
 		const asyncRoot = createTempDir("pi-async-job-tracker-");
 		try {
@@ -206,11 +237,11 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 			assert.ok(job);
 			assert.equal(job.status, "running");
 			assert.equal(job.sessionId, "session-restored");
-			assert.deepEqual(job.agents, ["reviewer", "worker"]);
-			assert.deepEqual(job.steps?.map((step: { index?: number }) => step.index), [1, 2]);
-			assert.equal(job.stepsTotal, 2);
+			assert.deepEqual(job.agents, ["scout", "reviewer", "worker", "writer"]);
+			assert.deepEqual(job.steps?.map((step: { index?: number }) => step.index), [0, 1, 2, 3]);
+			assert.equal(job.stepsTotal, 4);
 			assert.equal(job.runningSteps, 2);
-			assert.equal(job.completedSteps, 0);
+			assert.equal(job.completedSteps, 1);
 			assert.equal(job.activeParallelGroup, true);
 			assert.ok(state.poller, "expected restored active jobs to start polling");
 			assert.ok(ui.renderRequests >= 2, "expected reset and restore to request widget renders");
@@ -388,12 +419,12 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 			await new Promise((resolve) => setTimeout(resolve, 50));
 
 			const job = state.asyncJobs.get("run-chain");
-			assert.deepEqual(job?.steps?.map((step: { index?: number }) => step.index), [1, 2]);
-			assert.deepEqual(job?.agents, ["reviewer", "auditor"]);
-			assert.equal(job?.steps?.[0]?.currentTool, "read");
-			assert.equal(job?.steps?.[0]?.currentToolArgs, "src/tui/render.ts");
-			assert.deepEqual(job?.steps?.[0]?.recentTools?.map((tool: { tool: string; args: string }) => ({ tool: tool.tool, args: tool.args })), [{ tool: "grep", args: "async widget" }]);
-			assert.deepEqual(job?.steps?.[0]?.recentOutput, ["reviewer line"]);
+			assert.deepEqual(job?.steps?.map((step: { index?: number }) => step.index), [0, 1, 2, 3]);
+			assert.deepEqual(job?.agents, ["scout", "reviewer", "auditor", "writer"]);
+			assert.equal(job?.steps?.[1]?.currentTool, "read");
+			assert.equal(job?.steps?.[1]?.currentToolArgs, "src/tui/render.ts");
+			assert.deepEqual(job?.steps?.[1]?.recentTools?.map((tool: { tool: string; args: string }) => ({ tool: tool.tool, args: tool.args })), [{ tool: "grep", args: "async widget" }]);
+			assert.deepEqual(job?.steps?.[1]?.recentOutput, ["reviewer line"]);
 		} finally {
 			removeTempDir(asyncRoot);
 		}

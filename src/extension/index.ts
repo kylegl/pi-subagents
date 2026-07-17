@@ -254,8 +254,10 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	startResultWatcher();
 	primeExistingResults();
 
+	let disposeAsyncJobTracker = () => {};
 	const runtimeCleanup = () => {
 		disposeSubagentNotify();
+		disposeAsyncJobTracker();
 		mainWatchdog.dispose();
 		stopResultWatcher();
 		scheduledRunManager.stop();
@@ -268,9 +270,10 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	};
 	globalStore[runtimeCleanupStoreKey] = runtimeCleanup;
 
-	const { ensurePoller, refreshWidget, handleStarted, handleComplete, resetJobs, restoreActiveJobs } = createAsyncJobTracker(pi, state, ASYNC_DIR, {
+	const { ensurePoller, refreshWidget, handleStarted, handleComplete, resetJobs, restoreActiveJobs, dispose: disposeTracker } = createAsyncJobTracker(pi, state, ASYNC_DIR, {
 		widgetEnabled: config.asyncWidget !== false,
 	});
+	disposeAsyncJobTracker = disposeTracker;
 	let executorExecute: ((id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: ((r: AgentToolResult<Details>) => void) | undefined, ctx: ExtensionContext) => Promise<AgentToolResult<Details>>) | undefined;
 	const scheduledRunManager = createScheduledRunManager({
 		config,
@@ -557,6 +560,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", () => {
 		disposeSubagentNotify();
+		disposeAsyncJobTracker();
 		delete process.env[SUBAGENT_PARENT_SESSION_ENV];
 		for (const unsubscribe of eventUnsubscribes) {
 			try {
