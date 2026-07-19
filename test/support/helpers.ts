@@ -43,6 +43,7 @@ export function createEventBus() {
 
 interface AgentConfig {
 	name: string;
+	environment?: Record<string, string>;
 	description?: string;
 	systemPrompt?: string;
 	model?: string;

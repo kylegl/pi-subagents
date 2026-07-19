@@ -49,6 +49,28 @@ describe("async runner execution", () => {
 		assert.equal(resolveAsyncRunnerLogPaths({}), undefined);
 	});
 
+	it("serializes agent environment into background runner steps", () => {
+		const result = buildAsyncRunnerSteps("run-environment", {
+			chain: [{ agent: "worker", task: "check environment" }],
+			agents: [{
+				...agent("worker"),
+				environment: {
+					INHERITED_VALUE: "agent",
+					PI_SUBAGENT_RUN_ID: "spoofed",
+				},
+			}],
+			ctx,
+			asyncDir: path.join(process.cwd(), ".tmp-async-test"),
+			maxSubagentDepth: 2,
+		});
+
+		assert.ok("steps" in result, "expected successful step build");
+		assert.deepEqual(result.steps[0]?.environment, {
+			INHERITED_VALUE: "agent",
+			PI_SUBAGENT_RUN_ID: "spoofed",
+		});
+	});
+
 	it("resolves async step tool budgets with step over run over agent over config precedence", () => {
 		const result = buildAsyncRunnerSteps("run-1", {
 			chain: [

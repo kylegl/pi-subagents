@@ -472,6 +472,35 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 		assert.equal(typeof result, "boolean");
 	});
 
+	it("passes agent environment overrides to the background child", { skip: !isAsyncAvailable() ? "jiti not available" : undefined }, async () => {
+		mockPi.onCall({ echoEnv: ["AGENT_FEATURE_MODE", "PI_SUBAGENT_RUN_ID"] });
+		const id = `async-agent-environment-${Date.now().toString(36)}`;
+		executeAsyncSingle(id, {
+			agent: "worker",
+			task: "Check agent environment",
+			agentConfig: makeAgent("worker", {
+				completionGuard: false,
+				environment: {
+					AGENT_FEATURE_MODE: "recall-only",
+					PI_SUBAGENT_RUN_ID: "spoofed",
+				},
+			}),
+			ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-environment" },
+			artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
+			shareEnabled: false,
+			sessionRoot: path.join(tempDir, "sessions"),
+			maxSubagentDepth: 2,
+			acceptance: false,
+		});
+
+		const payload = await readAsyncPayload(id);
+		assert.equal(payload.success, true);
+		assert.deepEqual(JSON.parse(payload.results[0]?.output ?? "{}"), {
+			AGENT_FEATURE_MODE: "recall-only",
+			PI_SUBAGENT_RUN_ID: id,
+		});
+	});
+
 	it("background parses split UTF-8 JSON and a final unterminated protocol line", { skip: !isAsyncAvailable() ? "jiti not available" : undefined }, async () => {
 		const line = Buffer.from(JSON.stringify(events.assistantMessage("你好 from fragmented async JSON")));
 		const unicodeStart = line.indexOf(Buffer.from("你"));

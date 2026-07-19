@@ -73,7 +73,7 @@ function configObject(config: unknown): { value?: Record<string, unknown>; error
 }
 
 function hasKey(obj: Record<string, unknown>, key: string): boolean {
-	return Object.prototype.hasOwnProperty.call(obj, key);
+	return  Object.hasOwn(obj, key);
 }
 
 function asDisambiguationScope(scope: unknown): ManagementScope | undefined {
@@ -249,6 +249,7 @@ export function editableAgentConfig(agent: AgentConfig): AgentConfig {
 		...(base.model !== undefined ? { model: base.model } : {}),
 		...(base.fallbackModels !== undefined ? { fallbackModels: [...base.fallbackModels] } : {}),
 		...(base.thinking !== undefined ? { thinking: base.thinking } : {}),
+		...(base.environment !== undefined ? { environment: { ...base.environment } } : {}),
 		systemPromptMode: base.systemPromptMode,
 		inheritProjectContext: base.inheritProjectContext,
 		inheritSkills: base.inheritSkills,
@@ -288,6 +289,7 @@ export function preservedAgentFrontmatterFields(agent: AgentConfig, cfg: Record<
 	if (hasKey(cfg, "systemPrompt")) changed("systemPrompt");
 	if (hasKey(cfg, "runner")) changed("runner");
 	if (hasKey(cfg, "model")) changed("model");
+	if (hasKey(cfg, "environment")) changed("environment");
 	if (hasKey(cfg, "fallbackModels")) changed("fallbackModels");
 	if (hasKey(cfg, "tools")) changed("tools");
 	if (hasKey(cfg, "skills")) changed("skill", "skills");
@@ -419,6 +421,25 @@ function applyAgentConfig(target: AgentConfig, cfg: Record<string, unknown>): st
 			if (aliases.length) target.aliases = aliases;
 			else delete target.aliases;
 		} else return "config.aliases must be a comma-separated string, string array, or false when provided.";
+	}
+	if (hasKey(cfg, "environment")) {
+		if (cfg.environment === false || cfg.environment === "") {
+			target.environment = undefined;
+		} else if (cfg.environment && typeof cfg.environment === "object" && !Array.isArray(cfg.environment)) {
+			const entries = Object.entries(cfg.environment);
+			if (entries.some(([, value]) => typeof value !== "string")) {
+				return "config.environment must be an object with string values or false when provided.";
+			}
+			if (entries.some(([key]) => !key || key.includes("\0") || key.includes("="))) {
+				return "config.environment keys must be non-empty and cannot contain NUL or '='.";
+			}
+			if (entries.some(([, value]) => (value as string).includes("\0"))) {
+				return "config.environment values cannot contain NUL.";
+			}
+			target.environment = Object.fromEntries(entries) as Record<string, string>;
+		} else {
+			return "config.environment must be an object with string values or false when provided.";
+		}
 	}
 	if (hasKey(cfg, "systemPrompt")) {
 		if (cfg.systemPrompt === false || cfg.systemPrompt === "") target.systemPrompt = "";
@@ -671,6 +692,7 @@ function formatAgentDetail(agent: AgentConfig): string {
 	}
 	if (agent.aliases?.length) lines.push(`Aliases: ${agent.aliases.join(", ")}`);
 	if (agent.model) lines.push(`Model: ${agent.model}`);
+	if (agent.environment && Object.keys(agent.environment).length > 0) lines.push(`Environment: ${Object.keys(agent.environment).join(", ")}`);
 	if (agent.fallbackModels?.length) lines.push(`Fallback models: ${agent.fallbackModels.join(", ")}`);
 	if (tools.length) lines.push(`Tools: ${tools.join(", ")}`);
 	if (agent.skills?.length) lines.push(`Skills: ${agent.skills.join(", ")}`);

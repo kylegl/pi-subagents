@@ -134,6 +134,38 @@ afterEach(() => {
 	}
 });
 
+describe("buildPiArgs agent environment", () => {
+	it("overrides inherited non-reserved values and protects PI_SUBAGENT orchestration values", () => {
+		const { env } = buildPiArgs({
+			environment: {
+				INHERITED_VALUE: "agent",
+				AGENT_ONLY: "configured",
+				PI_SUBAGENT_CHILD: "0",
+				PI_SUBAGENT_RUN_ID: "spoofed",
+				PI_SUBAGENT_UNKNOWN_RESERVED: "spoofed",
+			},
+			baseArgs: ["-p"],
+			task: "hello",
+			sessionEnabled: false,
+			inheritProjectContext: false,
+			inheritSkills: false,
+			runId: "owned-run",
+		});
+		const spawnEnvironment = {
+			INHERITED_VALUE: "parent",
+			PARENT_ONLY: "inherited",
+			...env,
+		};
+
+		assert.equal(spawnEnvironment.INHERITED_VALUE, "agent");
+		assert.equal(spawnEnvironment.AGENT_ONLY, "configured");
+		assert.equal(spawnEnvironment.PARENT_ONLY, "inherited");
+		assert.equal(spawnEnvironment.PI_SUBAGENT_CHILD, "1");
+		assert.equal(spawnEnvironment.PI_SUBAGENT_RUN_ID, "owned-run");
+		assert.equal(spawnEnvironment.PI_SUBAGENT_UNKNOWN_RESERVED, undefined);
+	});
+});
+
 describe("buildPiArgs session wiring", () => {
 	it("projects launch-resolved extension identifiers without raw paths", () => {
 		const privateExt = path.join(os.tmpdir(), "private-extension-root", "secret-extension.ts");

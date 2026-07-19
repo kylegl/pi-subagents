@@ -154,7 +154,7 @@ Review carefully.`.replace(" description:", "description:"));
 
 		const external = discoverAgents(project, "project").agents.find((agent) => agent.name === "external")!;
 		assert.deepEqual(external.runner, { type: "external-cli", command: process.execPath, args: ["-e", "process.stdin.pipe(process.stdout)"], promptDelivery: "stdin" });
-		assert.match(serializeAgent(external), /runner:\n  type: external-cli\n  command:/);
+		assert.match(serializeAgent(external), /runner:\n {2}type: external-cli\n {2}command:/);
 		assert.deepEqual(discoverAgents(project, "project").agents.find((agent) => agent.name === "external")?.runner, external.runner);
 	}));
 
@@ -351,7 +351,7 @@ Do work
 		const worker = discoverAgents(dir, "project").agents.find((agent) => agent.name === "worker");
 		assert.deepEqual(worker?.permissions, { read: "allow", write: "ask", edit: "deny" });
 		assert.equal(worker?.extraFields?.permission, undefined);
-		assert.match(serializeAgent(worker!), /^permissions:\n  read: allow\n  write: ask\n  edit: deny$/m);
+		assert.match(serializeAgent(worker!), /^permissions:\n {2}read: allow\n {2}write: ask\n {2}edit: deny$/m);
 	});
 
 	it("rejects bash permission rules and conflicting aliases", () => {

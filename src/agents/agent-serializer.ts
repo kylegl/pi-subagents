@@ -8,6 +8,7 @@ export const KNOWN_FIELDS = new Set([
 	"description",
 	"alias",
 	"aliases",
+	"environment",
 	"tools",
 	"model",
 	"fallbackModels",
@@ -58,6 +59,18 @@ export function serializeAgent(config: AgentConfig, options: SerializeAgentOptio
 	lines.push(`description: ${config.description}`);
 	const aliasesValue = joinComma(config.aliases);
 	if (aliasesValue || preserve("alias", "aliases")) lines.push(`aliases: ${aliasesValue ?? ""}`);
+
+	if (config.environment !== undefined || preserve("environment")) {
+		const entries = Object.entries(config.environment ?? {});
+		if (entries.length === 0) {
+			lines.push("environment: {}");
+		} else {
+			lines.push("environment:");
+			for (const line of stringifyYaml(Object.fromEntries(entries)).trimEnd().split("\n")) {
+				lines.push(`  ${line}`);
+			}
+		}
+	}
 
 	const tools = [
 		...(config.tools ?? []),

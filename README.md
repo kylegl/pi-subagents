@@ -652,6 +652,7 @@ Example:
 ```
 
 Supported override fields are `description`, `model`, `fallbackModels`, `thinking`, `systemPromptMode`, `inheritProjectContext`, `inheritSkills`, `defaultContext`, `acceptanceRole`, `disabled`, `skills`, `tools`, and `systemPrompt`. `description` replaces the discovered description for builtin and custom agents, which lets list output show deployment-specific routing or model metadata. Use `defaultContext: false` or `acceptanceRole: false` to clear an inherited override. Project overrides beat user overrides.
+Supported override fields are `model`, `fallbackModels`, `thinking`, `systemPromptMode`, `inheritProjectContext`, `inheritSkills`, `defaultContext`, `acceptanceRole`, `disabled`, `skills`, `tools`, `systemPrompt`, and `environment`. `environment` is a string-to-string map applied to that agent's child process. Use `defaultContext: false` or `acceptanceRole: false` to clear an inherited override. Project overrides beat user overrides.
 
 Set `subagents.defaultModel` to give all subagents without an explicit model their own default model, separate from the parent session model. Per-agent model overrides and agent frontmatter still win.
 
@@ -685,6 +686,9 @@ name: scout
 package: code-analysis
 description: Fast codebase recon
 aliases: explorer, code-scout
+environment:
+  API_BASE_URL: https://api.example.test
+  FEATURE_MODE: "strict"
 tools: read, grep, find, ls, bash, mcp:chrome-devtools
 extensions:
 subagentOnlyExtensions: ./tools/child-only-search.ts
@@ -711,6 +715,8 @@ maxSubagentDepth: 1
 
 Your system prompt goes here.
 ```
+
+`environment` values override inherited parent environment values for that child in foreground and background runs. All keys and values must be strings. Keys beginning with `PI_SUBAGENT_` are reserved for pi-subagents orchestration and are ignored when the child environment is built.
 
 Simple-scalar list fields accept either the existing comma-separated form or a newline block list with one `- item` per line. This applies to `tools`, `defaultReads`, `skill`/`skills`, `skillPath`, `fallbackModels`, `extensions`, and `subagentOnlyExtensions`; for example:
 

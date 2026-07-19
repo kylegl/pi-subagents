@@ -1317,6 +1317,7 @@ async function runSingleStep(
 			: undefined;
 		const { args, env, tempDir, toolDiagnosticPath, runtimeAcknowledgedExtensionsPath, capabilityAudit: attemptCapabilityAudit } = buildPiArgs(omitUndefinedProperties({
 			parentSessionId: step.parentSessionId,
+			environment: step.environment,
 			baseArgs: ["--mode", "json", "-p"],
 			task,
 			sessionEnabled,
@@ -4662,13 +4663,17 @@ function startConfiguredSubagent(config: SubagentRunConfig): void {
 const configArg = process.argv[2];
 if (configArg) {
 	try {
-		const configJson = fs.readFileSync(configArg, "utf-8");
-		const config = JSON.parse(configJson) as SubagentRunConfig;
+		let configJson: string;
 		try {
-			fs.unlinkSync(configArg);
-		} catch {
-			// Temp config cleanup is best effort.
+			configJson = fs.readFileSync(configArg, "utf-8");
+		} finally {
+			try {
+				fs.unlinkSync(configArg);
+			} catch {
+				// Temp config cleanup is best effort.
+			}
 		}
+		const config = JSON.parse(configJson) as SubagentRunConfig;
 		startConfiguredSubagent(config);
 	} catch (err) {
 		console.error("Subagent runner error:", err);

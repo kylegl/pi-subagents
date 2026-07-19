@@ -5,6 +5,7 @@ export interface RunnerSubagentStep {
 	parentSessionId?: string;
 	/** Resolved opt-in rules for native Pi child tool calls. */
 	permissionRules?: import("./permissions.ts").PermissionRules;
+	environment?: Record<string, string>;
 	agent: string;
 	task: string;
 	runner?: ResolvedRunnerConfig;

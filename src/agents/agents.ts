@@ -62,6 +62,7 @@ export function defaultInheritSkills(): boolean {
 export interface BuiltinAgentOverrideBase {
 	description?: string;
 	model?: string;
+	environment?: Record<string, string>;
 	fallbackModels?: string[];
 	thinking?: string | false;
 	systemPromptMode: SystemPromptMode;
@@ -84,6 +85,7 @@ export interface BuiltinAgentOverrideBase {
 interface BuiltinAgentOverrideConfig {
 	description?: string;
 	model?: string | false;
+	environment?: Record<string, string>;
 	fallbackModels?: string[] | false;
 	thinking?: string | false;
 	systemPromptMode?: SystemPromptMode;
@@ -117,6 +119,7 @@ export interface AgentModelSourceInfo {
 export interface AgentConfig {
 	name: string;
 	runner?: AgentRunnerConfig;
+	environment?: Record<string, string>;
 	localName?: string;
 	packageName?: string;
 	description: string;
@@ -568,6 +571,7 @@ function cloneOverrideBase(agent: AgentConfig): BuiltinAgentOverrideBase {
 	return {
 		description: agent.description,
 		...(agent.model !== undefined ? { model: agent.model } : {}),
+		...(agent.environment ? { environment: { ...agent.environment } } : {}),
 		...(agent.fallbackModels ? { fallbackModels: [...agent.fallbackModels] } : {}),
 		...(agent.thinking !== undefined ? { thinking: agent.thinking } : {}),
 		systemPromptMode: agent.systemPromptMode,
@@ -592,6 +596,7 @@ function cloneOverrideValue(override: BuiltinAgentOverrideConfig): BuiltinAgentO
 	return {
 		...(override.description !== undefined ? { description: override.description } : {}),
 		...(override.model !== undefined ? { model: override.model } : {}),
+		...(override.environment !== undefined ? { environment: { ...override.environment } } : {}),
 		...(override.fallbackModels !== undefined
 			? { fallbackModels: override.fallbackModels === false ? false : [...override.fallbackModels] }
 			: {}),
@@ -710,6 +715,37 @@ function writeSettingsFile(filePath: string, settings: Record<string, unknown>):
 	fs.writeFileSync(filePath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
 }
 
+function parseEnvironmentMap(value: unknown, context: string): Record<string, string> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error(`${context}; expected an object with string values.`);
+	}
+	const environment: Record<string, string> = {};
+	for (const [key, entry] of Object.entries(value)) {
+		if (typeof entry !== "string") {
+			throw new Error(`${context}; expected an object with string values.`);
+		}
+		if (!key || key.includes("\0") || key.includes("=")) {
+			throw new Error(`${context}; keys must be non-empty and cannot contain NUL or '='.`);
+		}
+		if (entry.includes("\0")) {
+			throw new Error(`${context}; values cannot contain NUL.`);
+		}
+		environment[key] = entry;
+	}
+	return environment;
+}
+
+function parseAgentEnvironmentFrontmatter(raw: string | undefined, agentName: string): Record<string, string> | undefined {
+	if (raw === undefined) return undefined;
+	let parsed: unknown;
+	try {
+		parsed = raw.trim() ? parseYaml(raw) : {};
+	} catch (error) {
+		throw new Error(`Agent '${agentName}' has invalid environment frontmatter: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+	}
+	return parseEnvironmentMap(parsed, `Agent '${agentName}' has invalid environment frontmatter`);
+}
+
 function parseOverrideStringArrayOrFalse(
 	value: unknown,
 	meta: { filePath: string; name: string; field: string },
@@ -749,6 +785,13 @@ function parseBuiltinOverrideEntry(
 		} else {
 			throw new Error(`Builtin override '${name}' in '${filePath}' has invalid 'description'; expected a non-empty string.`);
 		}
+	}
+
+	if ("environment" in input) {
+		override.environment = parseEnvironmentMap(
+			input.environment,
+			`Builtin override '${name}' in '${filePath}' has invalid 'environment'`,
+		);
 	}
 
 	if ("model" in input) {
@@ -1009,6 +1052,7 @@ function applyBuiltinOverride(
 
 	if (override.description !== undefined) next.description = override.description;
 	if (override.model !== undefined) { if (override.model === false) delete next.model; else next.model = override.model; }
+	if (override.environment !== undefined) next.environment = { ...override.environment };
 	if (override.fallbackModels !== undefined) { if (override.fallbackModels === false) delete next.fallbackModels; else next.fallbackModels = [...override.fallbackModels]; }
 	if (override.thinking !== undefined) { if (override.thinking === false) delete next.thinking; else next.thinking = override.thinking; }
 	if (override.systemPromptMode !== undefined) next.systemPromptMode = override.systemPromptMode;
@@ -1129,6 +1173,9 @@ function applyCustomAgentOverride(
 	if (override.model !== undefined) {
 		fill("model", ["model"], override.model === false ? undefined : override.model);
 	}
+	if (override.environment !== undefined) {
+		fill("environment", ["environment"], { ...override.environment });
+	}
 	if (override.fallbackModels !== undefined) {
 		fill(
 			"fallbackModels",
@@ -1216,7 +1263,7 @@ function applyCustomAgentOverrides(
 
 export function buildBuiltinOverrideConfig(
 	base: BuiltinAgentOverrideBase,
-	draft: Pick<AgentConfig, "model" | "fallbackModels" | "thinking" | "systemPromptMode" | "inheritProjectContext" | "inheritSkills" | "defaultContext" | "acceptanceRole" | "disabled" | "systemPrompt" | "skills" | "tools" | "mcpDirectTools" | "extensions" | "subagentOnlyExtensions" | "completionGuard" | "toolBudget"> & Partial<Pick<AgentConfig, "description">>,
+	draft: Pick<AgentConfig, "model" | "environment" | "fallbackModels" | "thinking" | "systemPromptMode" | "inheritProjectContext" | "inheritSkills" | "defaultContext" | "acceptanceRole" | "disabled" | "systemPrompt" | "skills" | "tools" | "mcpDirectTools" | "extensions" | "subagentOnlyExtensions" | "completionGuard" | "toolBudget"> & Partial<Pick<AgentConfig, "description">>,
 ): BuiltinAgentOverrideConfig | undefined {
 	const override: BuiltinAgentOverrideConfig = {};
 
@@ -1225,6 +1272,7 @@ export function buildBuiltinOverrideConfig(
 		if (description && description !== base.description) override.description = description;
 	}
 	if (draft.model !== base.model) override.model = draft.model ?? false;
+	if (JSON.stringify(draft.environment) !== JSON.stringify(base.environment)) override.environment = { ...(draft.environment ?? {}) };
 	if (!arraysEqual(draft.fallbackModels, base.fallbackModels)) override.fallbackModels = draft.fallbackModels ? [...draft.fallbackModels] : false;
 	if (draft.thinking !== base.thinking) override.thinking = draft.thinking ?? false;
 	if (draft.systemPromptMode !== base.systemPromptMode) override.systemPromptMode = draft.systemPromptMode;
@@ -1288,7 +1336,7 @@ export function removeBuiltinAgentOverride(cwd: string, name: string, scope: "us
 	if (!agentOverrides || typeof agentOverrides !== "object" || Array.isArray(agentOverrides)) return { path: filePath, removed: false };
 
 	const nextOverrides = { ...(agentOverrides as Record<string, unknown>) };
-	if (!Object.prototype.hasOwnProperty.call(nextOverrides, name)) return { path: filePath, removed: false };
+	if (!Object.hasOwn(nextOverrides, name)) return { path: filePath, removed: false };
 	delete nextOverrides[name];
 	if (Object.keys(nextOverrides).length > 0) nextSubagents.agentOverrides = nextOverrides;
 	else delete nextSubagents.agentOverrides;
@@ -1350,7 +1398,7 @@ export function removeBuiltinAgentOverrideFields(
 	const nextEntry: Record<string, unknown> = { ...(entry as Record<string, unknown>) };
 	let removed = false;
 	for (const field of fields) {
-		if (Object.prototype.hasOwnProperty.call(nextEntry, field)) {
+		if (Object.hasOwn(nextEntry, field)) {
 			delete nextEntry[field];
 			removed = true;
 		}
@@ -1520,6 +1568,7 @@ function loadAgentsFromDir(dir: string, source: AgentSource): AgentConfig[] {
 		const skills = parseFrontmatterList(skillStr);
 		const skillPath = parseFrontmatterList(frontmatter.skillPath);
 		const fallbackModels = parseFrontmatterList(frontmatter.fallbackModels);
+		const environment = parseAgentEnvironmentFrontmatter(frontmatter.environment, localName);
 		const systemPromptMode = frontmatter.systemPromptMode === "replace"
 			? "replace"
 			: frontmatter.systemPromptMode === "append"
@@ -1605,6 +1654,7 @@ function loadAgentsFromDir(dir: string, source: AgentSource): AgentConfig[] {
 		const agent: AgentConfig = {
 			name: runtimeName,
 			...(runner !== undefined ? { runner } : {}),
+			environment,
 			localName,
 			...(packageName !== undefined ? { packageName } : {}),
 			description: frontmatter.description,
@@ -1667,7 +1717,6 @@ function loadChainsFromDir(dir: string, source: AgentSource): { chains: ChainCon
 			chains.set(chain.name, chain);
 		} catch (error) {
 			diagnostics.push({ source, filePath, error: error instanceof Error ? error.message : String(error) });
-			continue;
 		}
 	}
 

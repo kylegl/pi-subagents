@@ -467,6 +467,7 @@ export interface SteeringRecoveryDescriptor {
 	sourceRunId: string;
 	agentContract?: AgentContract;
 	agent: string;
+	environment?: Record<string, string>;
 	sessionFile?: string;
 	cwd: string;
 	model?: string;

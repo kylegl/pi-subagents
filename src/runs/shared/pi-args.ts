@@ -47,6 +47,7 @@ export const PI_INTERCOM_SESSION_ID_ENV = "PI_INTERCOM_SESSION_ID";
 
 export interface BuildPiArgsInput {
 	parentSessionId?: string;
+	environment?: Record<string, string>;
 	baseArgs: string[];
 	task: string;
 	sessionEnabled: boolean;
@@ -259,6 +260,12 @@ export function resolvePiLaunchToolPlan(input: ResolvePiLaunchToolPlanInput): Pi
 	};
 }
 
+function sanitizeAgentEnvironment(environment: Record<string, string> | undefined): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(environment ?? {}).filter(([key]) => !key.toUpperCase().startsWith("PI_SUBAGENT_")),
+	);
+}
+
 export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 	const args = [...input.baseArgs];
 
@@ -328,7 +335,7 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 		args.push(`Task: ${input.task}`);
 	}
 
-	const env: Record<string, string | undefined> = {};
+	const env: Record<string, string | undefined> = sanitizeAgentEnvironment(input.environment);
 	const piPackageRoot = process.env[PI_CODING_AGENT_PACKAGE_ROOT_ENV] ?? resolvePiPackageRoot();
 	if (piPackageRoot) env[PI_CODING_AGENT_PACKAGE_ROOT_ENV] = piPackageRoot;
 	if (!tempDir) tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-"));

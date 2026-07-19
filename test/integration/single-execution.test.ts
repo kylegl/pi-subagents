@@ -3251,6 +3251,26 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		}
 	});
 
+	it("passes agent environment overrides to the foreground child", async () => {
+		mockPi.onCall({ echoEnv: ["AGENT_FEATURE_MODE", "PI_SUBAGENT_RUN_ID"] });
+		const agents = [makeAgent("echo", {
+			environment: {
+				AGENT_FEATURE_MODE: "recall-only",
+				PI_SUBAGENT_RUN_ID: "spoofed",
+			},
+		})];
+
+		const result = await runSync(tempDir, agents, "echo", "Task", {
+			runId: "owned-foreground-run",
+		});
+
+		assert.equal(result.exitCode, 0);
+		assert.deepEqual(JSON.parse(result.finalOutput ?? "{}"), {
+			AGENT_FEATURE_MODE: "recall-only",
+			PI_SUBAGENT_RUN_ID: "owned-foreground-run",
+		});
+	});
+
 	it("passes the effective wait-tool setting through to child execution", async () => {
 		mockPi.onCall({ echoEnv: [WAIT_TOOL_ENABLED_ENV] });
 		const result = await runSync(tempDir, makeAgentConfigs(["echo"]), "echo", "Task", {

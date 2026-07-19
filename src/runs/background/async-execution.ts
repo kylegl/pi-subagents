@@ -429,7 +429,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, onProcessTerminal
 	const cfgPath = getAsyncConfigPath(suffix);
 	const runnerProcessInstanceId = randomUUID();
 	const launchConfig = { ...cfg, runnerProcessInstanceId };
-	fs.writeFileSync(cfgPath, JSON.stringify(launchConfig));
+	fs.writeFileSync(cfgPath, JSON.stringify(launchConfig), { mode: 0o600 });
 	const runner = path.join(path.dirname(fileURLToPath(import.meta.url)), "subagent-runner.ts");
 	const nodeCommand = resolveAsyncRunnerNodeCommand();
 	const launchForStartup = launchConfig as typeof launchConfig & { asyncDir?: unknown; revivalLease?: unknown };
@@ -465,6 +465,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, onProcessTerminal
 		closeFd(stdoutFd);
 		closeFd(stderrFd);
 		proc.on("error", (error) => {
+			fs.rmSync(cfgPath, { force: true });
 			console.error(`[pi-subagents] async spawn failed: ${error.message}`);
 		});
 		proc.once("close", (exitCode, signal) => {
@@ -518,6 +519,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, onProcessTerminal
 			onProcessTerminal?.(persisted);
 		});
 		if (typeof proc.pid !== "number") {
+			fs.rmSync(cfgPath, { force: true });
 			return { error: `async runner did not produce a pid for cwd: ${cwd}` };
 		}
 		proc.unref();
@@ -554,6 +556,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, onProcessTerminal
 	} catch (error) {
 		closeFd(stdoutFd);
 		closeFd(stderrFd);
+		fs.rmSync(cfgPath, { force: true });
 		return { error: error instanceof Error ? error.message : String(error) };
 	}
 }
@@ -742,6 +745,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			parentSessionId: ctx.parentSessionId ?? ctx.currentSessionId,
 			permissionRules,
 			...(params.capabilityCeiling ? { capabilityCeiling: params.capabilityCeiling } : {}),
+			environment: a.environment ? { ...a.environment } : undefined,
 			agent: s.agent,
 			task,
 			...(a.runner ? { runner: a.runner } : {}),
@@ -1353,6 +1357,7 @@ export function executeAsyncSingle(
 		cwd: runnerCwd,
 		...(model ? { model } : {}),
 		...(agentConfig.fallbackModels ? { fallbackModels: [...agentConfig.fallbackModels] } : {}),
+		...(agentConfig.environment ? { environment: { ...agentConfig.environment } } : {}),
 		...(effectiveThinking ? { thinking: resolveEffectiveThinking(model, effectiveThinking) } : {}),
 		...(agentConfig.tools ? { tools: [...agentConfig.tools] } : {}),
 		...(agentConfig.extensions ? { extensions: [...agentConfig.extensions] } : {}),
@@ -1400,6 +1405,7 @@ export function executeAsyncSingle(
 						parentSessionId: ctx.parentSessionId ?? ctx.currentSessionId,
 						permissionRules,
 						...(capabilityCeiling ? { capabilityCeiling } : {}),
+						environment: agentConfig.environment ? { ...agentConfig.environment } : undefined,
 						agent,
 						task: taskWithOutputInstruction,
 						...(agentConfig.runner ? { runner: agentConfig.runner } : {}),
