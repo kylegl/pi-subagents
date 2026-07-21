@@ -88,17 +88,22 @@ async function waitForCondition(
 function createUiContext() {
 	const widgets: unknown[] = [];
 	let renderRequests = 0;
+	const theme = {
+		fg: (_theme: string, text: string) => text,
+	};
+	const tui = {
+		requestRender: () => {
+			renderRequests += 1;
+		},
+	};
 	const ctx = {
 		hasUI: true,
 		ui: {
-			theme: {
-				fg: (_theme: string, text: string) => text,
-			},
+			theme,
 			setWidget: (_key: string, value: unknown) => {
 				widgets.push(value);
-			},
-			requestRender: () => {
 				renderRequests += 1;
+				if (typeof value === "function") value(tui, theme);
 			},
 		},
 	};
@@ -133,9 +138,11 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 		const animation = timers.find((timer) => timer.ms === 80)!;
 		assert.ok(animation);
 		const installs = ui.widgets.length;
+		const requestsBeforeTick = ui.renderRequests;
 		monotonic = 240;
 		animation.callback();
 		assert.equal(ui.widgets.length, installs, "ticks retain the installed component");
+		assert.ok(ui.renderRequests > requestsBeforeTick, "ticks request a render through the installed widget without keyboard input");
 		tracker.dispose();
 		assert.equal(animation.cleared, true);
 	});

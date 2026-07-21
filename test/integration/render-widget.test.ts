@@ -33,6 +33,11 @@ function firstRunningGlyph(text: string): string {
 function createUiContext() {
 	const widgets: unknown[] = [];
 	let renderRequests = 0;
+	const tui = {
+		requestRender: () => {
+			renderRequests += 1;
+		},
+	};
 	const ctx = {
 		hasUI: true,
 		ui: {
@@ -40,13 +45,11 @@ function createUiContext() {
 			setWidget: (_key: string, value: unknown) => {
 				widgets.push(value);
 			},
-			requestRender: () => {
-				renderRequests += 1;
-			},
 		},
 	};
 	return {
 		ctx,
+		tui,
 		widgets,
 		get renderRequests() {
 			return renderRequests;
@@ -55,7 +58,8 @@ function createUiContext() {
 }
 
 function renderWidgetLines(widget: unknown, width = 180): string[] {
-	return (widget as (_tui: unknown, widgetTheme: typeof theme) => { render(width: number): string[] })(undefined, theme).render(width);
+	const tui = { requestRender: () => {} };
+	return (widget as (_tui: typeof tui, widgetTheme: typeof theme) => { render(width: number): string[] })(tui, theme).render(width);
 }
 
 function restoreDescriptor(target: object, key: string, descriptor: PropertyDescriptor | undefined): void {
@@ -672,14 +676,17 @@ describe("subagent async widget rendering", () => {
 		}
 	});
 
-	it("retains one installed component while animation frames advance", () => {
+	it("requests a render from the installed component while animation frames advance", () => {
 		const ui = createUiContext();
 		const job = { asyncId: "run-static", asyncDir: "/tmp/run", status: "running", agents: ["scout"], startedAt: 1000 };
 		renderWidget(ui.ctx as never, [job], { frame: 0, nowMs: 1000 } as never);
-		const widget = ui.widgets.at(-1);
-		const first = renderWidgetLines(widget).join("\n");
+		const widget = ui.widgets.at(-1) as (tui: typeof ui.tui, widgetTheme: typeof theme) => { render(width: number): string[] };
+		const component = widget(ui.tui, theme);
+		const first = component.render(180).join("\n");
+		const requestsBeforeUpdate = ui.renderRequests;
 		renderWidget(ui.ctx as never, [job], { frame: 3, nowMs: 2000 } as never);
-		const second = renderWidgetLines(widget).join("\n");
+		assert.ok(ui.renderRequests > requestsBeforeUpdate, "animation updates must request a render without keyboard input");
+		const second = component.render(180).join("\n");
 		assert.equal(ui.widgets.length, 1, "animation must not reinstall the widget");
 		assert.notEqual(first, second);
 		assert.match(second, /1s/);

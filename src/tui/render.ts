@@ -1387,6 +1387,7 @@ export function buildAsyncCompactWidgetLines(jobs: AsyncJobState[], theme: Theme
 class AsyncWidgetComponent implements Component {
 	private readonly container = new Container();
 	private theme?: Theme;
+	private requestRender?: () => void;
 	private dirty = true;
 	private disposed = false;
 	private lastWidth?: number;
@@ -1406,10 +1407,12 @@ class AsyncWidgetComponent implements Component {
 		this.jobs = jobs;
 		this.clock = clock;
 		this.invalidate();
+		this.requestRender?.();
 	}
 
-	attach(_tui: { requestRender(): void } | undefined, theme: Theme): void {
+	attach(tui: { requestRender(): void }, theme: Theme): void {
 		this.theme = theme;
+		this.requestRender = () => tui.requestRender();
 		this.dirty = true;
 	}
 

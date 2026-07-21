@@ -97,7 +97,6 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 		if (disposed) return;
 		try {
 			renderWidget(ctx, options.widgetEnabled === false ? [] : jobs, renderClock());
-			ctx.ui.requestRender?.();
 		} catch (error) {
 			if (error instanceof Error && error.message.includes("Extension context no longer active")) {
 				if (state.lastUiContext === ctx) state.lastUiContext = undefined;
