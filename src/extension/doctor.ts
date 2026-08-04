@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { discoverAgentsAll, type AgentSource } from "../agents/agents.ts";
 import { isAsyncAvailable } from "../runs/background/async-execution.ts";
 import { formatSpawnBudgetSummary, getSpawnBudgetSnapshot } from "../runs/shared/spawn-budget.ts";
+import { managedHerdrIntegrationPath } from "../integrations/herdr-lifecycle-authority.ts";
 import { diagnoseIntercomBridge, type IntercomBridgeDiagnostic } from "../intercom/intercom-bridge.ts";
 import { discoverAvailableSkills, type SkillSource } from "../agents/skills.ts";
 import {
@@ -175,6 +176,14 @@ function formatSpawnBudgetSection(input: DoctorReportInput): string[] {
 	];
 }
 
+function formatHerdrAuthoritySection(config: ExtensionConfig): string[] {
+	if (config.herdrLifecycleAuthority !== true) return ["- lifecycle authority: disabled (opt in with herdrLifecycleAuthority: true)"];
+	if (process.env.HERDR_ENV !== "1" || !process.env.HERDR_PANE_ID) return ["- lifecycle authority: inactive outside a Herdr-managed pane"];
+	if (fs.existsSync(managedHerdrIntegrationPath())) return ["- lifecycle authority: conflict — uninstall Herdr's managed Pi integration before activation"];
+	if (!process.env.HERDR_SOCKET_PATH) return ["- lifecycle authority: inactive — Herdr socket is unavailable"];
+	return ["- lifecycle authority: active (socket and pane environment present)"];
+}
+
 function formatPermissionSystemSection(): string[] {
 	const lines: string[] = [];
 	const parentSession = process.env["PI_SUBAGENT_PARENT_SESSION"] ?? "";
@@ -217,6 +226,9 @@ export function buildDoctorReport(input: DoctorReportInput): string {
 		"",
 		"Permission system",
 		...formatPermissionSystemSection(),
+		"",
+		"Herdr integration",
+		...formatHerdrAuthoritySection(input.config),
 		"",
 		"Intercom bridge",
 		...lineFromCheck("intercom bridge", () => formatIntercomDiagnostic(deps.diagnoseIntercomBridge({

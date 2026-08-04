@@ -375,6 +375,17 @@ rows = [
 
 The bridge uses Herdr's existing `herdr:blocked` sibling event when an async child needs attention. It also emits `herdr:busy` while async work remains. Herdr versions that support that sibling event keep the pane's semantic state `working`; older versions ignore it safely and still display the metadata label while the Pi integration remains the lifecycle authority.
 
+### Optional Herdr lifecycle authority
+
+For Herdr versions where the sibling overlay is unavailable, pi-subagents can replace Herdr's managed Pi integration with its package-owned lifecycle authority. This is explicitly opt-in and remains inert outside a Herdr-managed Pi TUI:
+
+1. Run `herdr integration uninstall pi`. The package refuses to activate while `~/.pi/agent/extensions/herdr-agent-state.ts` (or the equivalent under `PI_CODING_AGENT_DIR`) exists, preventing two reporters from racing.
+2. Set `"herdrLifecycleAuthority": true` in `~/.pi/agent/extensions/subagent/config.json`.
+3. Restart Pi in a Herdr pane and run subagent doctor. The Herdr section should say `active` without printing pane or socket values.
+4. Dispatch an async run and let the parent settle; `herdr agent get` should remain `working` until the run completes. A run needing attention reports `blocked`.
+
+To remove the package authority, set `herdrLifecycleAuthority` to `false` (or remove it), restart Pi, then run `herdr integration install pi`. Herdr updates do not overwrite this package module. The fork tracks official Herdr Pi integration version 8 and adds only a generic provider-snapshot seam; it is intended to be removed after Herdr accepts an equivalent seam, leaving the pi-subagents adapter in place. Extension authors can import the snapshot and refresh event constants and snapshot types from `pi-subagents/herdr-lifecycle`; snapshots replace one provider's complete current-session state rather than incrementing counters.
+
 Herdr 0.7.5+ can also open an on-demand inspector for an existing async run:
 
 ```ts

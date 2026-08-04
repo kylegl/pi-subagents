@@ -38,6 +38,8 @@ import { registerMainWatchdog } from "../watchdog/register-main.ts";
 import { registerSlashSubagentBridge } from "../slash/slash-bridge.ts";
 import { createNativeSupervisorChannel } from "../intercom/native-supervisor-channel.ts";
 import { registerHerdrStatusBridge } from "../integrations/herdr-status.ts";
+import { registerHerdrLifecycleAuthority } from "../integrations/herdr-lifecycle-authority.ts";
+import { registerHerdrBackgroundAdapter } from "../integrations/herdr-background-adapter.ts";
 import { registerSubagentRpcBridge } from "./rpc.ts";
 import { clearSlashSnapshots, getSlashRenderableSnapshot, resolveSlashMessageDetails, restoreSlashFinalSnapshots, type SlashMessageDetails } from "../slash/slash-live-state.ts";
 import { inspectSubagentStatus } from "../runs/background/run-status.ts";
@@ -472,12 +474,23 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			agents: job.agents,
 			needsAttention: job.activityState === "needs_attention",
 		}));
+	const herdrAuthorityEnabled = config.herdrLifecycleAuthority === true;
 	const herdrStatusBridge = registerHerdrStatusBridge({
 		events: pi.events,
+		env: herdrAuthorityEnabled ? {} : process.env,
 		getRuns: activeHerdrRuns,
 		async runHerdr(args) {
 			await pi.exec(process.env.HERDR_BIN || "herdr", [...args], { timeout: 5_000 });
 		},
+	});
+	const herdrLifecycleAuthority = registerHerdrLifecycleAuthority({
+		enabled: herdrAuthorityEnabled,
+		events: pi.events,
+	});
+	const herdrBackgroundAdapter = registerHerdrBackgroundAdapter({
+		enabled: herdrAuthorityEnabled,
+		events: pi.events,
+		getRuns: activeHerdrRuns,
 	});
 	const controlEventHandler = (payload: unknown) => {
 		handleSubagentControlNotice({
@@ -509,6 +522,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		pi.events.on(SUBAGENT_CONTROL_EVENT, controlEventHandler),
 		pi.events.on(SUBAGENT_STEERING_NOTICE_EVENT, steeringNoticeHandler),
 		herdrStatusBridge.dispose,
+		herdrLifecycleAuthority.dispose,
+		herdrBackgroundAdapter.dispose,
 		rpcBridge.dispose,
 	];
 	globalStore[eventUnsubscribeStoreKey] = eventUnsubscribes;
@@ -572,17 +587,25 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		fleetStatus?.setContext(ctx);
 	};
 
-	pi.on("agent_start", () => {
+	pi.on("agent_start", (_event, ctx) => {
 		herdrStatusBridge.agentStarted();
+		herdrBackgroundAdapter.agentStarted();
+		herdrLifecycleAuthority.agentStarted(ctx);
 	});
 
-	pi.on("session_start", (event, ctx) => {
+	pi.on("agent_settled", (_event, ctx) => {
+		herdrLifecycleAuthority.agentSettled(ctx);
+	});
+
+	pi.on("session_start", async (event, ctx) => {
 		const recovering = event.reason === "startup" || event.reason === "reload" || event.reason === "resume";
 		resetSessionState(ctx, recovering);
 		herdrStatusBridge.sessionStarted({
 			hasUI: ctx.hasUI === true,
 			runs: activeHerdrRuns(),
 		});
+		if (state.currentSessionId) herdrBackgroundAdapter.sessionStarted(state.currentSessionId);
+		await herdrLifecycleAuthority.sessionStarted(event, ctx);
 		rpcBridge.emitReady(ctx);
 		supervisorChannel.start();
 	});
@@ -630,5 +653,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			if (!isStaleExtensionContextError(error)) throw error;
 		}
 		await herdrStatusBridge.flush();
+		await herdrLifecycleAuthority.flush();
 	});
 }

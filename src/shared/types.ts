@@ -1738,6 +1738,8 @@ export interface ExtensionConfig {
 	missions?: MissionStoreConfig;
 	/** Small fixed authority policy for the supported operational actions. */
 	authorityPolicy?: AuthorityPolicyConfig;
+	/** Opt in to the package-owned Herdr Pi lifecycle authority. */
+	herdrLifecycleAuthority?: boolean;
 }
 
 // ============================================================================
