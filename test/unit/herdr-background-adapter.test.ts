@@ -83,6 +83,8 @@ describe("Herdr background adapter", () => {
 		const snapshots: any[] = [];
 		let refresh: (() => void) | undefined;
 		let cleared = 0;
+		const timerHandle = setTimeout(() => {}, 0);
+		clearTimeout(timerHandle);
 		events.on(HERDR_BACKGROUND_SNAPSHOT_EVENT, (snapshot) => snapshots.push(snapshot));
 		const adapter = registerHerdrBackgroundAdapter({
 			enabled: true,
@@ -90,7 +92,7 @@ describe("Herdr background adapter", () => {
 			getRuns: () => runs,
 			refreshMs: 10,
 			timers: {
-				setInterval(handler) { refresh = handler as () => void; return { unref() {} } as NodeJS.Timeout; },
+				setInterval(handler: () => void) { refresh = handler; return timerHandle; },
 				clearInterval() { cleared += 1; },
 			},
 		});

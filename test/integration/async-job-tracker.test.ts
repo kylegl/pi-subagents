@@ -32,9 +32,10 @@ const trackerMod = await tryImport<AsyncJobTrackerModule>("./src/runs/background
 const available = !!trackerMod;
 
 function createState() {
+	const currentSessionId: string | null = null;
 	return {
 		baseCwd: "/repo",
-		currentSessionId: null,
+		currentSessionId,
 		asyncJobs: new Map(),
 		fleetJobs: new Map(),
 		foregroundRuns: new Map(),
