@@ -86,7 +86,7 @@ describe("Herdr lifecycle authority socket integration", () => {
 	it("reports background attention transitions with foreground-message precedence", async () => {
 		const socket = await recordingSocket();
 		const events = new Events();
-		let runs: HerdrBackgroundRun[] = [];
+		let runs: HerdrBackgroundRun[] = [{ id: "restored-blocked", status: "running", sessionId: "session-1", needsAttention: true }];
 		const authority = registerHerdrLifecycleAuthority({
 			enabled: true,
 			events,
@@ -94,8 +94,7 @@ describe("Herdr lifecycle authority socket integration", () => {
 			officialIntegrationPath: path.join(path.dirname(socket.socketPath), "absent.ts"),
 		});
 		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs });
-		adapter.sessionStarted("session-1");
-		await authority.sessionStarted({ reason: "startup" }, context());
+		await authority.sessionStarted({ reason: "startup" }, context(), () => adapter.sessionStarted("session-1"));
 
 		runs = [{ id: "working", status: "running", sessionId: "session-1" }];
 		adapter.publish();
@@ -119,7 +118,7 @@ describe("Herdr lifecycle authority socket integration", () => {
 		await authority.flush();
 
 		assert.deepEqual(socket.requests.filter((request) => request.method === "pane.report_agent").map((request) => [request.params.state, request.params.message]), [
-			["idle", undefined],
+			["blocked", "pi-subagents background work needs attention"],
 			["working", undefined],
 			["blocked", "pi-subagents background work needs attention"],
 			["working", undefined],
@@ -144,8 +143,7 @@ describe("Herdr lifecycle authority socket integration", () => {
 			officialIntegrationPath: path.join(path.dirname(socket.socketPath), "absent.ts"),
 		});
 		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs });
-		adapter.sessionStarted("session-1");
-		await authority.sessionStarted({ reason: "startup" }, context("session-1", false));
+		await authority.sessionStarted({ reason: "startup" }, context("session-1", false), () => adapter.sessionStarted("session-1"));
 
 		runs = [{ id: "root-a", status: "running", sessionId: "session-1" }];
 		events.emit(SUBAGENT_ASYNC_STARTED_EVENT, { id: "root-a" });
@@ -180,8 +178,7 @@ describe("Herdr lifecycle authority socket integration", () => {
 			officialIntegrationPath: path.join(path.dirname(socket.socketPath), "absent.ts"),
 		});
 		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs, refreshMs: 0 });
-		adapter.sessionStarted("session-1");
-		await authority.sessionStarted({ reason: "startup" }, context("session-1", false));
+		await authority.sessionStarted({ reason: "startup" }, context("session-1", false), () => adapter.sessionStarted("session-1"));
 		authority.agentSettled(context());
 
 		runs = [{ ...runs[0]!, status: "complete" }];
@@ -217,22 +214,20 @@ describe("Herdr lifecycle authority socket integration", () => {
 		});
 		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs, refreshMs: 0 });
 
-		adapter.sessionStarted("session-1");
-		await authority.sessionStarted({ reason: "startup" }, context("session-1"));
+		await authority.sessionStarted({ reason: "startup" }, context("session-1"), () => adapter.sessionStarted("session-1"));
 		await authority.flush();
-		assert.equal(reports.at(-1).params.state, "working", "startup restores the live root");
+		assert.deepEqual(reports.filter((request) => request.method === "pane.report_agent").map((request) => request.params.state), ["working"], "startup restores the live root without false idle");
 
-		await authority.sessionStarted({ reason: "reload" }, context("session-1"));
+		await authority.sessionStarted({ reason: "reload" }, context("session-1"), () => adapter.sessionStarted("session-1"));
 		await authority.flush();
-		assert.equal(reports.at(-1).params.state, "working", "reload requests a fresh snapshot");
+		assert.deepEqual(reports.filter((request) => request.method === "pane.report_agent").map((request) => request.params.state), ["working", "working"], "reload restores the live root without false idle");
 
 		events.emit("herdr:blocked", { active: true, label: "stale foreground question" });
 		runs = [
 			{ id: "stale-old-session", status: "running", sessionId: "session-1" },
 			{ id: "revived", status: "paused", sessionId: "session-2" },
 		];
-		adapter.sessionStarted("session-2");
-		await authority.sessionStarted({ reason: "resume" }, context("session-2"));
+		await authority.sessionStarted({ reason: "resume" }, context("session-2"), () => adapter.sessionStarted("session-2"));
 		await authority.flush();
 		assert.equal(reports.at(-1).params.state, "idle", "replacement clears old-session and paused work");
 
@@ -293,8 +288,7 @@ describe("Herdr lifecycle authority socket integration", () => {
 			sendRequest: async (request) => { reports.push(request); return true; },
 		});
 		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns, refreshMs: 0 });
-		adapter.sessionStarted("session-2");
-		await authority.sessionStarted({ reason: "resume" }, context("session-2"));
+		await authority.sessionStarted({ reason: "resume" }, context("session-2"), () => adapter.sessionStarted("session-2"));
 		await authority.flush();
 		assert.equal(reports.at(-1).params.state, "idle");
 
@@ -350,8 +344,7 @@ describe("Herdr lifecycle authority socket integration", () => {
 			sendRequest: async () => { attempts += 1; throw new Error("socket unavailable"); },
 		});
 		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs, refreshMs: 0 });
-		adapter.sessionStarted("session-1");
-		await assert.doesNotReject(authority.sessionStarted({ reason: "startup" }, context("session-1")));
+		await assert.doesNotReject(authority.sessionStarted({ reason: "startup" }, context("session-1"), () => adapter.sessionStarted("session-1")));
 
 		runs = [{ id: "still-runs", status: "running", sessionId: "session-1" }];
 		assert.doesNotThrow(() => adapter.publish());
@@ -369,18 +362,21 @@ describe("Herdr lifecycle authority socket integration", () => {
 	it("is inert unless explicitly enabled in a Herdr TUI and rejects a managed integration conflict", async () => {
 		const socket = await recordingSocket();
 		const events = new Events();
+		let providerInitializations = 0;
+		const initializeProvider = () => { providerInitializations += 1; };
 		const disabled = registerHerdrLifecycleAuthority({ enabled: false, events, env: { HERDR_ENV: "1", HERDR_PANE_ID: "p", HERDR_SOCKET_PATH: socket.socketPath } });
-		await disabled.sessionStarted({ reason: "startup" }, context());
+		await disabled.sessionStarted({ reason: "startup" }, context(), initializeProvider);
 		assert.equal(disabled.status, "disabled");
 		const official = path.join(path.dirname(socket.socketPath), "herdr-agent-state.ts");
 		fs.writeFileSync(official, "// HERDR_INTEGRATION_ID=pi\n");
 		const conflicting = registerHerdrLifecycleAuthority({ enabled: true, events, env: { HERDR_ENV: "1", HERDR_PANE_ID: "p", HERDR_SOCKET_PATH: socket.socketPath }, officialIntegrationPath: official });
-		await conflicting.sessionStarted({ reason: "startup" }, context());
+		await conflicting.sessionStarted({ reason: "startup" }, context(), initializeProvider);
 		assert.equal(conflicting.status, "conflict");
 		assert.equal(conflicting.conflictPath, official);
 		const headless = registerHerdrLifecycleAuthority({ enabled: true, events, env: { HERDR_ENV: "1", HERDR_PANE_ID: "p", HERDR_SOCKET_PATH: socket.socketPath }, officialIntegrationPath: `${official}.absent` });
-		await headless.sessionStarted({ reason: "startup" }, { ...context(), mode: "rpc" });
+		await headless.sessionStarted({ reason: "startup" }, { ...context(), mode: "rpc" }, initializeProvider);
 		assert.equal(headless.status, "outside-herdr");
+		assert.equal(providerInitializations, 0, "inactive authorities never activate artifact readers or timers");
 		assert.deepEqual(socket.requests, []);
 	});
 });

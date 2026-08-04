@@ -646,12 +646,11 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			hasUI: ctx.hasUI === true,
 			runs: activeTrackedHerdrRuns(),
 		});
-		await herdrLifecycleAuthority.sessionStarted(event, ctx);
-		// Activating after the authority's environment/TUI/conflict checks keeps
-		// artifact reconciliation fully inert everywhere the authority is inactive.
-		if (herdrLifecycleAuthority.status === "active" && state.currentSessionId) {
-			herdrBackgroundAdapter.sessionStarted(state.currentSessionId);
-		}
+		await herdrLifecycleAuthority.sessionStarted(event, ctx, () => {
+			// The authority invokes providers only after its environment/TUI/conflict
+			// checks, but before its first semantic state report.
+			if (state.currentSessionId) herdrBackgroundAdapter.sessionStarted(state.currentSessionId);
+		});
 		rpcBridge.emitReady(ctx);
 		supervisorChannel.start();
 	});

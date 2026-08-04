@@ -174,13 +174,17 @@ export function registerHerdrLifecycleAuthority(options: AuthorityOptions) {
 	return {
 		get status(): HerdrAuthorityStatus { return status; },
 		get conflictPath(): string | undefined { return conflict ? officialPath : undefined; },
-		async sessionStarted(event: { reason?: string }, ctx: HerdrSessionContext): Promise<void> {
+		async sessionStarted(event: { reason?: string }, ctx: HerdrSessionContext, initializeProviders?: () => void): Promise<void> {
 			if (!options.enabled || !inHerdr || conflict || disposed || ctx.mode !== "tui") return;
 			status = "active"; rootSession = true; providers.clear(); updateSession(ctx);
 			blockedCount = 0; foregroundBlockedMessage = undefined;
 			lastState = undefined; lastMessage = undefined;
 			enqueue(request("pane.report_agent_session", { ...sessionRef(), ...(event.reason ? { session_start_source: event.reason } : {}) }));
 			foregroundActive = ctx.isIdle?.() === false;
+			// Providers must remain inert until the authority has passed its Herdr,
+			// TUI, and conflict checks. Initialize them before the refresh and first
+			// semantic report so restored work cannot be preceded by a false idle.
+			initializeProviders?.();
 			options.events.emit(HERDR_BACKGROUND_REFRESH_EVENT, { sessionId: sessionScopeId });
 			publish();
 			await queue;
