@@ -27,8 +27,17 @@ export function registerHerdrBackgroundAdapter(options: {
 	enabled: boolean;
 	events: HerdrLifecycleEvents;
 	getRuns: () => Iterable<HerdrBackgroundRun>;
+	refreshMs?: number;
+	timers?: {
+		setInterval: typeof setInterval;
+		clearInterval: typeof clearInterval;
+	};
 }) {
+	const refreshMs = options.refreshMs ?? 1_000;
+	const timers = options.timers ?? globalThis;
 	let sessionId: string | undefined;
+	let refreshTimer: ReturnType<typeof setInterval> | undefined;
+	let disposed = false;
 	const acknowledgedAttention = new Set<string>();
 	const unsubscribes: Array<() => void> = [];
 	const currentRoots = () => {
@@ -43,7 +52,7 @@ export function registerHerdrBackgroundAdapter(options: {
 		return [...roots.values()];
 	};
 	const publish = () => {
-		if (!options.enabled || !sessionId) return;
+		if (!options.enabled || disposed || !sessionId) return;
 		const runs = currentRoots();
 		const activeIds = new Set(runs.map((run) => run.id));
 		for (const id of acknowledgedAttention) if (!activeIds.has(id)) acknowledgedAttention.delete(id);
@@ -88,9 +97,30 @@ export function registerHerdrBackgroundAdapter(options: {
 		});
 	}
 	return {
-		sessionStarted(nextSessionId: string) { sessionId = nextSessionId; acknowledgedAttention.clear(); publish(); },
-		agentStarted() { for (const run of currentRoots()) if (run.needsAttention) acknowledgedAttention.add(run.id); publish(); },
+		sessionStarted(nextSessionId: string) {
+			if (disposed) return;
+			sessionId = nextSessionId;
+			acknowledgedAttention.clear();
+			publish();
+			if (options.enabled && refreshMs > 0 && !refreshTimer) {
+				refreshTimer = timers.setInterval(publish, refreshMs);
+				refreshTimer.unref?.();
+			}
+		},
+		agentStarted() {
+			if (disposed) return;
+			for (const run of currentRoots()) if (run.needsAttention) acknowledgedAttention.add(run.id);
+			publish();
+		},
 		publish,
-		dispose() { acknowledgedAttention.clear(); for (const unsub of unsubscribes) unsub(); },
+		dispose() {
+			if (disposed) return;
+			disposed = true;
+			if (refreshTimer) timers.clearInterval(refreshTimer);
+			refreshTimer = undefined;
+			sessionId = undefined;
+			acknowledgedAttention.clear();
+			for (const unsub of unsubscribes) unsub();
+		},
 	};
 }

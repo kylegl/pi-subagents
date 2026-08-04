@@ -47,6 +47,46 @@ describe("Herdr background adapter", () => {
 		adapter.dispose();
 	});
 
+	it("converges from the authoritative projection when lifecycle events are missed", () => {
+		const events = new Events();
+		let runs: HerdrBackgroundRun[] = [{ id: "revived", status: "paused", sessionId: "session-a" }];
+		const snapshots: any[] = [];
+		let refresh: (() => void) | undefined;
+		let cleared = 0;
+		events.on(HERDR_BACKGROUND_SNAPSHOT_EVENT, (snapshot) => snapshots.push(snapshot));
+		const adapter = registerHerdrBackgroundAdapter({
+			enabled: true,
+			events,
+			getRuns: () => runs,
+			refreshMs: 10,
+			timers: {
+				setInterval(handler) { refresh = handler as () => void; return { unref() {} } as NodeJS.Timeout; },
+				clearInterval() { cleared += 1; },
+			},
+		});
+
+		adapter.sessionStarted("session-a");
+		assert.deepEqual(snapshots.at(-1).items, [], "paused work is not active");
+		runs = [{ id: "revived", status: "running", sessionId: "session-a" }];
+		refresh?.();
+		assert.deepEqual(snapshots.at(-1).items, [{ id: "revived", state: "working" }]);
+
+		adapter.sessionStarted("session-b");
+		runs = [
+			{ id: "revived", status: "running", sessionId: "session-a" },
+			{ id: "replacement", status: "queued", sessionId: "session-b" },
+		];
+		refresh?.();
+		assert.deepEqual(snapshots.at(-1).items, [{ id: "replacement", state: "working" }]);
+
+		adapter.dispose();
+		const countAtDispose = snapshots.length;
+		refresh?.();
+		adapter.sessionStarted("session-a");
+		assert.equal(snapshots.length, countAtDispose, "a replaced adapter cannot republish stale state");
+		assert.equal(cleared, 1);
+	});
+
 	it("does nothing while disabled", () => {
 		const events = new Events();
 		const snapshots: unknown[] = [];

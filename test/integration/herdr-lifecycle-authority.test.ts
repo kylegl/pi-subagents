@@ -11,6 +11,7 @@ import {
 	registerHerdrLifecycleAuthority,
 } from "../../src/integrations/herdr-lifecycle-authority.ts";
 import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_ASYNC_STARTED_EVENT } from "../../src/shared/types.ts";
+import { listAsyncRuns } from "../../src/runs/background/async-status.ts";
 
 class Events {
 	private readonly emitter = new EventEmitter();
@@ -108,6 +109,115 @@ describe("Herdr lifecycle authority socket integration", () => {
 		await authority.flush();
 
 		assert.deepEqual(socket.requests.filter((request) => request.method === "pane.report_agent").map((request) => request.params.state), ["working", "idle"]);
+		adapter.dispose();
+		authority.dispose();
+	});
+
+	it("rebuilds authoritative roots across reload, session replacement, stale events, and revival", async () => {
+		const events = new Events();
+		const reports: any[] = [];
+		let runs: HerdrBackgroundRun[] = [
+			{ id: "restored-root", status: "running", sessionId: "session-1" },
+			{ id: "nested", status: "running", sessionId: "session-1", parentWorkflowRunId: "restored-root" },
+			{ id: "foreign", status: "running", sessionId: "session-other" },
+		];
+		const authority = registerHerdrLifecycleAuthority({
+			enabled: true,
+			events,
+			env: { HERDR_ENV: "1", HERDR_PANE_ID: "p", HERDR_SOCKET_PATH: "injected" },
+			officialIntegrationPath: path.join(os.tmpdir(), `absent-${Date.now()}.ts`),
+			sendRequest: async (request) => { reports.push(request); return true; },
+		});
+		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs, refreshMs: 0 });
+
+		adapter.sessionStarted("session-1");
+		await authority.sessionStarted({ reason: "startup" }, context("session-1"));
+		await authority.flush();
+		assert.equal(reports.at(-1).params.state, "working", "startup restores the live root");
+
+		await authority.sessionStarted({ reason: "reload" }, context("session-1"));
+		await authority.flush();
+		assert.equal(reports.at(-1).params.state, "working", "reload requests a fresh snapshot");
+
+		events.emit("herdr:blocked", { active: true, label: "stale foreground question" });
+		runs = [
+			{ id: "stale-old-session", status: "running", sessionId: "session-1" },
+			{ id: "revived", status: "paused", sessionId: "session-2" },
+		];
+		adapter.sessionStarted("session-2");
+		await authority.sessionStarted({ reason: "resume" }, context("session-2"));
+		await authority.flush();
+		assert.equal(reports.at(-1).params.state, "idle", "replacement clears old-session and paused work");
+
+		runs = [{ id: "revived", status: "running", sessionId: "session-2" }];
+		adapter.publish();
+		await authority.flush();
+		assert.equal(reports.at(-1).params.state, "working", "artifact reconciliation revives work without a start event");
+
+		events.emit(SUBAGENT_ASYNC_COMPLETE_EVENT, { runId: "revived" });
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+		await authority.flush();
+		assert.equal(reports.at(-1).params.state, "working", "an out-of-order completion cannot override the authoritative run");
+
+		runs = [{ id: "revived", status: "complete", sessionId: "session-2" }];
+		events.emit(SUBAGENT_ASYNC_STARTED_EVENT, { id: "revived" });
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+		await authority.flush();
+		assert.equal(reports.at(-1).params.state, "idle", "an out-of-order start converges to the authoritative completion");
+		adapter.dispose();
+		authority.dispose();
+	});
+
+	it("restores a revived root from lifecycle artifacts without receiving its start event", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-revival-artifacts-"));
+		cleanups.push(() => fs.rmSync(root, { recursive: true, force: true }));
+		const writeStatus = (id: string, sessionId: string, state: "paused" | "running", pid = process.pid) => {
+			const runDir = path.join(root, id);
+			fs.mkdirSync(runDir, { recursive: true });
+			fs.writeFileSync(path.join(runDir, "status.json"), JSON.stringify({
+				runId: id,
+				mode: "single",
+				state,
+				sessionId,
+				pid,
+				startedAt: Date.now(),
+				lastUpdate: Date.now(),
+				steps: [{ agent: "worker", status: state === "running" ? "running" : "pending" }],
+			}));
+		};
+		writeStatus("revived", "session-2", "paused");
+		writeStatus("foreign", "session-other", "running", 999_999_999);
+		const events = new Events();
+		const reports: any[] = [];
+		const getRuns = () => listAsyncRuns(root, {
+			states: ["queued", "running"],
+			sessionId: "session-2",
+			reconcile: false,
+		}).flatMap((candidate) => listAsyncRuns(root, {
+			runId: candidate.id,
+			states: ["queued", "running"],
+			sessionId: "session-2",
+		})).map((run) => ({ id: run.id, status: run.state, sessionId: run.sessionId, parentWorkflowRunId: run.parentWorkflowRunId }));
+		const authority = registerHerdrLifecycleAuthority({
+			enabled: true,
+			events,
+			env: { HERDR_ENV: "1", HERDR_PANE_ID: "p", HERDR_SOCKET_PATH: "injected" },
+			officialIntegrationPath: path.join(root, "absent.ts"),
+			sendRequest: async (request) => { reports.push(request); return true; },
+		});
+		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns, refreshMs: 0 });
+		adapter.sessionStarted("session-2");
+		await authority.sessionStarted({ reason: "resume" }, context("session-2"));
+		await authority.flush();
+		assert.equal(reports.at(-1).params.state, "idle");
+
+		writeStatus("revived", "session-2", "running");
+		adapter.publish();
+		await authority.flush();
+		assert.equal(reports.at(-1).params.state, "working");
+		assert.deepEqual(getRuns().map((run) => run.id), ["revived"], "foreign shared-root artifacts stay excluded");
+		const foreign = JSON.parse(fs.readFileSync(path.join(root, "foreign", "status.json"), "utf8"));
+		assert.equal(foreign.state, "running", "foreign stale artifacts are not reconciled or mutated");
 		adapter.dispose();
 		authority.dispose();
 	});

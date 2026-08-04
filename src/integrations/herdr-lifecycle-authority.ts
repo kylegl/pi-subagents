@@ -171,6 +171,7 @@ export function registerHerdrLifecycleAuthority(options: AuthorityOptions) {
 		async sessionStarted(event: { reason?: string }, ctx: HerdrSessionContext): Promise<void> {
 			if (!options.enabled || !inHerdr || conflict || disposed || ctx.mode !== "tui") return;
 			status = "active"; rootSession = true; providers.clear(); updateSession(ctx);
+			blockedCount = 0; foregroundBlockedMessage = undefined;
 			lastState = undefined; lastMessage = undefined;
 			enqueue(request("pane.report_agent_session", { ...sessionRef(), ...(event.reason ? { session_start_source: event.reason } : {}) }));
 			foregroundActive = ctx.isIdle?.() === false;
