@@ -183,8 +183,9 @@ describe("Herdr lifecycle authority socket integration", () => {
 
 		runs = [{ ...runs[0]!, status: "complete" }];
 		events.emit(SUBAGENT_ASYNC_COMPLETE_EVENT, { runId: "root" });
-		// Pi starts its automatic notification turn before the adapter's queued
-		// post-reconciliation snapshot is published.
+		// Match the production agent_start callback order in extension/index.ts:
+		// invoke the background adapter before marking the foreground turn active.
+		adapter.agentStarted();
 		authority.agentStarted(context("session-1", false));
 		await new Promise<void>((resolve) => queueMicrotask(resolve));
 		await authority.flush();

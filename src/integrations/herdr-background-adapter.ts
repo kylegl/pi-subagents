@@ -117,7 +117,9 @@ export function registerHerdrBackgroundAdapter<TimerHandle extends HerdrBackgrou
 		},
 		agentStarted() {
 			if (disposed) return;
-			publish();
+			// Let the authority mark the foreground turn active before completed
+			// background work is removed from the aggregate lifecycle state.
+			queueMicrotask(publish);
 		},
 		publish,
 		dispose() {
