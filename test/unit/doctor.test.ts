@@ -80,9 +80,11 @@ describe("buildDoctorReport", () => {
 					isAsyncAvailable: () => true,
 					discoverAgentsAll: () => ({
 						builtin: [makeAgent("builtin-a", "builtin")],
+						package: [],
 						user: [makeAgent("user-a", "user")],
 						project: [makeAgent("project-a", "project"), makeAgent("project-b", "project")],
 						chains: [makeChain("user-flow", "user"), makeChain("project-flow", "project")],
+						chainDiagnostics: [],
 						userDir: path.join(root, "home", ".agents"),
 						projectDir: path.join(root, ".pi", "agents"),
 						userChainDir: path.join(root, "home", ".pi", "agent", "chains"),
