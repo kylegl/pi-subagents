@@ -383,8 +383,8 @@ For Herdr versions where the sibling overlay is unavailable, pi-subagents can re
 
 1. Record `herdr integration status`, then run `herdr integration uninstall pi`. Do not enable the replacement while `~/.pi/agent/extensions/herdr-agent-state.ts` (or the equivalent under `PI_CODING_AGENT_DIR`) exists: doctor reports `conflicting-authority`, and pi-subagents refuses to start a second reporter.
 2. Add `"herdrLifecycleAuthority": true` to `~/.pi/agent/extensions/subagent/config.json` and restart Pi inside Herdr. Installing pi-subagents alone never enables or replaces lifecycle authority.
-3. Run `/subagents-doctor` (or `subagent` with `{ "action": "doctor" }`). The Herdr section distinguishes `disabled`, `inactive outside Herdr`, `conflicting-authority`, `socket-unreachable`, and `active` without printing pane IDs or socket paths.
-4. Confirm `herdr integration status` shows the managed Pi integration as not installed and doctor says `active`. `herdr agent get "$HERDR_PANE_ID"` should report source `herdr:pi`.
+3. Run `/subagents-doctor` (or `subagent` with `{ "action": "doctor" }`) from the root interactive Pi TUI. The Herdr section distinguishes `disabled`, `inactive outside Herdr`, `inactive non-TUI runtime`, `conflicting-authority`, `socket-unreachable`, and `active` without printing pane IDs or socket paths. RPC, JSON, print, and other headless sessions remain inactive even when they inherit Herdr environment variables.
+4. Confirm `herdr integration status` shows the managed Pi integration as not installed and doctor says `active` in that TUI session. `herdr agent get "$HERDR_PANE_ID"` should report source `herdr:pi`.
 
 Use this focused validation after activation or an update:
 

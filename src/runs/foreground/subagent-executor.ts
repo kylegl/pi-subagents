@@ -4250,6 +4250,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 							cwd: requestCwd,
 							config: deps.config,
 							state: deps.state,
+							isTuiRuntime: ctx.mode === "tui",
 							context: paramsWithResolvedCwd.context,
 							requestedSessionDir: paramsWithResolvedCwd.sessionDir,
 							currentSessionFile,

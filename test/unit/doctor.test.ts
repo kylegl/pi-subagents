@@ -134,6 +134,7 @@ describe("buildDoctorReport", () => {
 			const base = {
 				cwd: root,
 				state: makeState(root),
+				isTuiRuntime: true,
 				herdrManagedIntegrationPath: managedPath,
 				herdrSocketReachable: () => true,
 			};
@@ -154,7 +155,12 @@ describe("buildDoctorReport", () => {
 			base.herdrSocketReachable = () => true;
 			const active = await line({ herdrLifecycleAuthority: true }, { HERDR_ENV: "1", HERDR_PANE_ID: "sensitive-pane", HERDR_SOCKET_PATH: "sensitive-socket" });
 			assert.match(active, /active/);
-			assert.doesNotMatch([unreachable, active].join("\n"), /sensitive-pane|sensitive-socket/);
+			base.isTuiRuntime = false;
+			const headless = await line({ herdrLifecycleAuthority: true }, { HERDR_ENV: "1", HERDR_PANE_ID: "sensitive-pane", HERDR_SOCKET_PATH: "sensitive-socket" });
+			assert.match(headless, /inactive non-TUI runtime/);
+			assert.match(headless, /requires a root interactive TUI session/);
+			assert.doesNotMatch(headless, /: active|socket-unreachable/);
+			assert.doesNotMatch([unreachable, active, headless].join("\n"), /sensitive-pane|sensitive-socket/);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}

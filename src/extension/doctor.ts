@@ -42,6 +42,8 @@ interface DoctorReportInput {
 	expandTilde?: (value: string) => string;
 	paths?: DoctorPaths;
 	deps?: Partial<DoctorDeps>;
+	/** Whether the current invocation is running in Pi's interactive TUI mode. */
+	isTuiRuntime?: boolean;
 	/** Test seam; production diagnostics use the current process environment. */
 	herdrEnv?: NodeJS.ProcessEnv;
 	herdrManagedIntegrationPath?: string;
@@ -206,6 +208,9 @@ async function formatHerdrAuthoritySection(input: DoctorReportInput): Promise<st
 	if (env.HERDR_ENV !== "1" || !env.HERDR_PANE_ID) return ["- lifecycle authority: inactive outside Herdr"];
 	if (fs.existsSync(input.herdrManagedIntegrationPath ?? managedHerdrIntegrationPath())) {
 		return ["- lifecycle authority: conflicting-authority — uninstall Herdr's managed Pi integration before activation"];
+	}
+	if (input.isTuiRuntime !== true) {
+		return ["- lifecycle authority: inactive non-TUI runtime — requires a root interactive TUI session"];
 	}
 	const socketPath = env.HERDR_SOCKET_PATH;
 	const socketReachable = input.herdrSocketReachable ?? defaultHerdrSocketReachable;
