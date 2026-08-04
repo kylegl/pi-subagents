@@ -1,6 +1,4 @@
 // Package-owned fork of Herdr's official Pi lifecycle integration.
-// Upstream provenance: herdrdev/herdr HERDR_INTEGRATION_ID=pi, version 8
-// https://github.com/herdrdev/herdr/blob/master/src/integration/assets/pi/herdr-agent-state.ts
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
@@ -8,6 +6,14 @@ import { getAgentDir } from "../shared/utils.ts";
 
 export const HERDR_BACKGROUND_SNAPSHOT_EVENT = "pi-subagents:herdr-background-snapshot";
 export const HERDR_BACKGROUND_REFRESH_EVENT = "pi-subagents:herdr-background-refresh";
+/** Pinned upstream baseline for reviewing changes while this temporary fork exists. */
+export const HERDR_LIFECYCLE_PROVENANCE = Object.freeze({
+	repository: "herdrdev/herdr",
+	path: "src/integration/assets/pi/herdr-agent-state.ts",
+	integrationId: "pi",
+	integrationVersion: 8,
+	commit: "5eab32da81b403c2a277222ab97417a8bf90c35f",
+} as const);
 const SOURCE = "herdr:pi";
 
 export type HerdrWorkState = "working" | "blocked";

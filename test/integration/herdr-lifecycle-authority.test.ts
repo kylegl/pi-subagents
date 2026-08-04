@@ -301,6 +301,34 @@ describe("Herdr lifecycle authority socket integration", () => {
 		assert.ok(requests.every((request) => request.params.agent_session_id === "native-id"));
 	});
 
+	it("isolates socket failures while async snapshots continue to reconcile", async () => {
+		const events = new Events();
+		let attempts = 0;
+		let runs: HerdrBackgroundRun[] = [];
+		const authority = registerHerdrLifecycleAuthority({
+			enabled: true,
+			events,
+			env: { HERDR_ENV: "1", HERDR_PANE_ID: "p", HERDR_SOCKET_PATH: "unreachable" },
+			officialIntegrationPath: path.join(os.tmpdir(), `absent-${Date.now()}.ts`),
+			sendRequest: async () => { attempts += 1; throw new Error("socket unavailable"); },
+		});
+		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs, refreshMs: 0 });
+		adapter.sessionStarted("session-1");
+		await assert.doesNotReject(authority.sessionStarted({ reason: "startup" }, context("session-1")));
+
+		runs = [{ id: "still-runs", status: "running", sessionId: "session-1" }];
+		assert.doesNotThrow(() => adapter.publish());
+		await assert.doesNotReject(authority.flush());
+		runs = [{ ...runs[0]!, status: "complete" }];
+		assert.doesNotThrow(() => adapter.publish());
+		await assert.doesNotReject(authority.flush());
+
+		assert.ok(attempts >= 3, "session, working, and settled reports were attempted");
+		assert.equal(runs[0]!.status, "complete", "socket reporting does not mutate or stop async execution state");
+		adapter.dispose();
+		authority.dispose();
+	});
+
 	it("is inert unless explicitly enabled in a Herdr TUI and rejects a managed integration conflict", async () => {
 		const socket = await recordingSocket();
 		const events = new Events();

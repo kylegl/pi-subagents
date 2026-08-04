@@ -377,14 +377,34 @@ The bridge uses Herdr's existing `herdr:blocked` sibling event when an async chi
 
 ### Optional Herdr lifecycle authority
 
-For Herdr versions where the sibling overlay is unavailable, pi-subagents can replace Herdr's managed Pi integration with its package-owned lifecycle authority. This is explicitly opt-in and remains inert outside a Herdr-managed Pi TUI:
+For Herdr versions where the sibling overlay is unavailable, pi-subagents can replace Herdr's managed Pi integration with a package-owned authority. It is opt-in, does nothing outside a Herdr-managed Pi TUI, and never changes async execution when Herdr is unavailable.
 
-1. Run `herdr integration uninstall pi`. The package refuses to activate while `~/.pi/agent/extensions/herdr-agent-state.ts` (or the equivalent under `PI_CODING_AGENT_DIR`) exists, preventing two reporters from racing.
-2. Set `"herdrLifecycleAuthority": true` in `~/.pi/agent/extensions/subagent/config.json`.
-3. Restart Pi in a Herdr pane and run subagent doctor. The Herdr section should say `active` without printing pane or socket values.
-4. Dispatch an async run and let the parent settle; `herdr agent get` should remain `working` until the run completes. A run needing attention reports `blocked`.
+#### Activate and verify
 
-To remove the package authority, set `herdrLifecycleAuthority` to `false` (or remove it), restart Pi, then run `herdr integration install pi`. Herdr updates do not overwrite this package module. The fork tracks official Herdr Pi integration version 8 and adds only a generic provider-snapshot seam; it is intended to be removed after Herdr accepts an equivalent seam, leaving the pi-subagents adapter in place. Extension authors can import the snapshot and refresh event constants and snapshot types from `pi-subagents/herdr-lifecycle`; snapshots replace one provider's complete current-session state rather than incrementing counters.
+1. Record `herdr integration status`, then run `herdr integration uninstall pi`. Do not enable the replacement while `~/.pi/agent/extensions/herdr-agent-state.ts` (or the equivalent under `PI_CODING_AGENT_DIR`) exists: doctor reports `conflicting-authority`, and pi-subagents refuses to start a second reporter.
+2. Add `"herdrLifecycleAuthority": true` to `~/.pi/agent/extensions/subagent/config.json` and restart Pi inside Herdr. Installing pi-subagents alone never enables or replaces lifecycle authority.
+3. Run `/subagents-doctor` (or `subagent` with `{ "action": "doctor" }`). The Herdr section distinguishes `disabled`, `inactive outside Herdr`, `conflicting-authority`, `socket-unreachable`, and `active` without printing pane IDs or socket paths.
+4. Confirm `herdr integration status` shows the managed Pi integration as not installed and doctor says `active`. `herdr agent get "$HERDR_PANE_ID"` should report source `herdr:pi`.
+
+Use this focused validation after activation or an update:
+
+- Start one async run, allow the parent turn to settle, and confirm `herdr agent get "$HERDR_PANE_ID"` remains `working` until the run completes, then becomes `idle` or `done`.
+- Start two async runs. Complete one and confirm the pane remains `working`; complete the other and confirm the final `idle`/`done` transition.
+- While an async run is active, run `/reload`; confirm the pane returns to `working` until that run completes.
+- Trigger `needs_attention`; confirm `blocked`, clear the attention condition and confirm `working`, then complete the run.
+- Temporarily make the Herdr socket unavailable and run a short async task. Doctor should report `socket-unreachable`, while Pi accepts input and the task still completes. Restore Herdr and restart Pi afterward.
+
+#### Update, rollback, and remove
+
+The replacement is source code shipped inside the pi-subagents package, not the file managed by `herdr integration install pi`, so `herdr update` cannot silently overwrite it. After updating Herdr or pi-subagents, keep the managed Pi integration uninstalled, restart Pi, rerun doctor and the focused validation above. If validation fails, disable `herdrLifecycleAuthority`, restart Pi, and run `herdr integration install pi` to roll back immediately; optionally restore the previously working pi-subagents package version before trying again.
+
+For complete removal, set `herdrLifecycleAuthority` to `false` (or delete the key), restart Pi, uninstall pi-subagents using the package installation method you originally used, then run `herdr integration install pi`. Verify doctor says `disabled` (if pi-subagents remains installed) and `herdr integration status` reports Pi current. No Herdr-managed integration file should be left alongside the package authority.
+
+#### Upstream provenance and deletion condition
+
+The fork is pinned in code as `HERDR_LIFECYCLE_PROVENANCE`: official `herdrdev/herdr` Pi integration version 8 at commit `5eab32da81b403c2a277222ab97417a8bf90c35f`, path `src/integration/assets/pi/herdr-agent-state.ts`. For each upstream lifecycle change, diff that pinned file against the newer official version, review foreground state, blocked prompts, session identity, sequencing, TUI gating, and socket retry changes, then update the pin only with integration-test and focused Herdr validation evidence.
+
+This fork adds only the generic provider-snapshot seam. Once Herdr's official Pi integration exposes an equivalent composable seam, delete the package-owned authority and its activation/config path, restore the managed integration, and retain only the pi-subagents background adapter. Extension authors can import provenance, snapshot/refresh event constants, and snapshot types from `pi-subagents/herdr-lifecycle`; snapshots replace one provider's complete current-session state rather than incrementing counters.
 
 Herdr 0.7.5+ can also open an on-demand inspector for an existing async run:
 

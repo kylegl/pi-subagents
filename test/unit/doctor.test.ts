@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 import { buildDoctorReport } from "../../src/extension/doctor.ts";
 import type { AgentConfig, ChainConfig } from "../../src/agents/agents.ts";
-import type { SubagentState } from "../../src/shared/types.ts";
+import type { ExtensionConfig, SubagentState } from "../../src/shared/types.ts";
 
 function makeState(cwd: string): SubagentState {
 	return {
@@ -48,7 +48,7 @@ function makeChain(name: string, source: ChainConfig["source"]): ChainConfig {
 }
 
 describe("buildDoctorReport", () => {
-	it("formats a bounded successful environment summary", () => {
+	it("formats a bounded successful environment summary", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-doctor-success-"));
 		try {
 			const state = makeState(root);
@@ -67,7 +67,7 @@ describe("buildDoctorReport", () => {
 			};
 			for (const dir of Object.values(paths)) fs.mkdirSync(dir, { recursive: true });
 
-			const report = buildDoctorReport({
+			const report = await buildDoctorReport({
 				cwd: root,
 				config: { defaultSessionDir: "~/subagent-sessions", intercomBridge: { mode: "always" }, maxSubagentSpawnsPerSession: 4 },
 				state,
@@ -125,12 +125,45 @@ describe("buildDoctorReport", () => {
 		}
 	});
 
-	it("keeps reporting when a directory or discovery check fails", () => {
+	it("distinguishes Herdr authority states without exposing environment values", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-doctor-herdr-"));
+		try {
+			const managedPath = path.join(root, "herdr-agent-state.ts");
+			const base = {
+				cwd: root,
+				state: makeState(root),
+				herdrManagedIntegrationPath: managedPath,
+				herdrSocketReachable: () => true,
+			};
+			const line = async (config: ExtensionConfig, herdrEnv: NodeJS.ProcessEnv) => (await buildDoctorReport({
+				...base,
+				config,
+				herdrEnv,
+			})).split("Herdr integration\n")[1]!.split("\n")[0]!;
+
+			assert.match(await line({}, {}), /disabled/);
+			assert.match(await line({ herdrLifecycleAuthority: true }, {}), /inactive outside Herdr/);
+			fs.writeFileSync(managedPath, "// managed authority");
+			assert.match(await line({ herdrLifecycleAuthority: true }, { HERDR_ENV: "1", HERDR_PANE_ID: "sensitive-pane", HERDR_SOCKET_PATH: "sensitive-socket" }), /conflicting-authority/);
+			fs.rmSync(managedPath);
+			base.herdrSocketReachable = () => false;
+			const unreachable = await line({ herdrLifecycleAuthority: true }, { HERDR_ENV: "1", HERDR_PANE_ID: "sensitive-pane", HERDR_SOCKET_PATH: "sensitive-socket" });
+			assert.match(unreachable, /socket-unreachable/);
+			base.herdrSocketReachable = () => true;
+			const active = await line({ herdrLifecycleAuthority: true }, { HERDR_ENV: "1", HERDR_PANE_ID: "sensitive-pane", HERDR_SOCKET_PATH: "sensitive-socket" });
+			assert.match(active, /active/);
+			assert.doesNotMatch([unreachable, active].join("\n"), /sensitive-pane|sensitive-socket/);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps reporting when a directory or discovery check fails", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-doctor-failure-"));
 		try {
 			const asyncPath = path.join(root, "async-file");
 			fs.writeFileSync(asyncPath, "not a directory");
-			const report = buildDoctorReport({
+			const report = await buildDoctorReport({
 				cwd: root,
 				config: {},
 				state: makeState(root),

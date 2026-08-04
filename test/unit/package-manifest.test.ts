@@ -74,6 +74,13 @@ test("published extension APIs use supported package entrypoints", async () => {
 	const herdrLifecycle = await import("pi-subagents/herdr-lifecycle");
 	assert.equal(herdrLifecycle.HERDR_BACKGROUND_REFRESH_EVENT, "pi-subagents:herdr-background-refresh");
 	assert.equal(herdrLifecycle.HERDR_BACKGROUND_SNAPSHOT_EVENT, "pi-subagents:herdr-background-snapshot");
+	assert.deepEqual(herdrLifecycle.HERDR_LIFECYCLE_PROVENANCE, {
+		repository: "herdrdev/herdr",
+		path: "src/integration/assets/pi/herdr-agent-state.ts",
+		integrationId: "pi",
+		integrationVersion: 8,
+		commit: "5eab32da81b403c2a277222ab97417a8bf90c35f",
+	});
 	const preflight = await import("pi-subagents/preflight");
 	assert.equal(preflight.SUBAGENT_LAUNCH_CONTRACT_VERSION, 2);
 	assert.equal(typeof preflight.resolveSubagentLaunchContract, "function");

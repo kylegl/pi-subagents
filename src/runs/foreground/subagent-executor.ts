@@ -4246,7 +4246,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				return {
 					content: [{
 						type: "text",
-						text: buildDoctorReport(omitUndefinedProperties({
+						text: await buildDoctorReport(omitUndefinedProperties({
 							cwd: requestCwd,
 							config: deps.config,
 							state: deps.state,

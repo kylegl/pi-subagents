@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as path from "node:path";
 import { discoverAgentsAll, type AgentSource } from "../agents/agents.ts";
 import { isAsyncAvailable } from "../runs/background/async-execution.ts";
@@ -41,6 +42,10 @@ interface DoctorReportInput {
 	expandTilde?: (value: string) => string;
 	paths?: DoctorPaths;
 	deps?: Partial<DoctorDeps>;
+	/** Test seam; production diagnostics use the current process environment. */
+	herdrEnv?: NodeJS.ProcessEnv;
+	herdrManagedIntegrationPath?: string;
+	herdrSocketReachable?: (socketPath: string) => boolean | Promise<boolean>;
 }
 
 function defaultPaths(): DoctorPaths {
@@ -176,12 +181,38 @@ function formatSpawnBudgetSection(input: DoctorReportInput): string[] {
 	];
 }
 
-function formatHerdrAuthoritySection(config: ExtensionConfig): string[] {
-	if (config.herdrLifecycleAuthority !== true) return ["- lifecycle authority: disabled (opt in with herdrLifecycleAuthority: true)"];
-	if (process.env.HERDR_ENV !== "1" || !process.env.HERDR_PANE_ID) return ["- lifecycle authority: inactive outside a Herdr-managed pane"];
-	if (fs.existsSync(managedHerdrIntegrationPath())) return ["- lifecycle authority: conflict — uninstall Herdr's managed Pi integration before activation"];
-	if (!process.env.HERDR_SOCKET_PATH) return ["- lifecycle authority: inactive — Herdr socket is unavailable"];
-	return ["- lifecycle authority: active (socket and pane environment present)"];
+function defaultHerdrSocketReachable(socketPath: string): Promise<boolean> {
+	const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\${socketPath}` : socketPath;
+	return new Promise((resolve) => {
+		let finished = false;
+		const socket = net.createConnection(endpoint);
+		const finish = (reachable: boolean) => {
+			if (finished) return;
+			finished = true;
+			clearTimeout(timer);
+			socket.destroy();
+			resolve(reachable);
+		};
+		const timer = setTimeout(() => finish(false), 300);
+		timer.unref?.();
+		socket.once("connect", () => finish(true));
+		socket.once("error", () => finish(false));
+	});
+}
+
+async function formatHerdrAuthoritySection(input: DoctorReportInput): Promise<string[]> {
+	if (input.config.herdrLifecycleAuthority !== true) return ["- lifecycle authority: disabled (opt in with herdrLifecycleAuthority: true)"];
+	const env = input.herdrEnv ?? process.env;
+	if (env.HERDR_ENV !== "1" || !env.HERDR_PANE_ID) return ["- lifecycle authority: inactive outside Herdr"];
+	if (fs.existsSync(input.herdrManagedIntegrationPath ?? managedHerdrIntegrationPath())) {
+		return ["- lifecycle authority: conflicting-authority — uninstall Herdr's managed Pi integration before activation"];
+	}
+	const socketPath = env.HERDR_SOCKET_PATH;
+	const socketReachable = input.herdrSocketReachable ?? defaultHerdrSocketReachable;
+	if (!socketPath || !await socketReachable(socketPath)) {
+		return ["- lifecycle authority: socket-unreachable — Herdr reporting is unavailable; Pi and async runs remain functional"];
+	}
+	return ["- lifecycle authority: active (package authority configured and socket endpoint reachable)"];
 }
 
 function formatPermissionSystemSection(): string[] {
@@ -201,7 +232,7 @@ function formatPermissionSystemSection(): string[] {
 	return lines;
 }
 
-export function buildDoctorReport(input: DoctorReportInput): string {
+export async function buildDoctorReport(input: DoctorReportInput): Promise<string> {
 	const paths = input.paths ?? defaultPaths();
 	const deps = { ...DEFAULT_DEPS, ...input.deps };
 	const lines = [
@@ -228,7 +259,7 @@ export function buildDoctorReport(input: DoctorReportInput): string {
 		...formatPermissionSystemSection(),
 		"",
 		"Herdr integration",
-		...formatHerdrAuthoritySection(input.config),
+		...await formatHerdrAuthoritySection(input),
 		"",
 		"Intercom bridge",
 		...lineFromCheck("intercom bridge", () => formatIntercomDiagnostic(deps.diagnoseIntercomBridge({
