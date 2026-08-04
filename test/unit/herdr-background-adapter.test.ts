@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 import { registerHerdrBackgroundAdapter, type HerdrBackgroundRun } from "../../src/integrations/herdr-background-adapter.ts";
 import { HERDR_BACKGROUND_REFRESH_EVENT, HERDR_BACKGROUND_SNAPSHOT_EVENT } from "../../src/integrations/herdr-lifecycle-authority.ts";
-import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_ASYNC_STARTED_EVENT } from "../../src/shared/types.ts";
+import { SUBAGENT_ASYNC_ACTIVITY_CHANGED_EVENT, SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_ASYNC_STARTED_EVENT } from "../../src/shared/types.ts";
 
 class Events {
 	private emitter = new EventEmitter();
@@ -33,6 +33,7 @@ describe("Herdr background adapter", () => {
 		assert.equal(snapshots[0].provider, "pi-subagents");
 		assert.equal(snapshots[0].sessionId, "session-a");
 		assert.deepEqual(snapshots[0].items.map((item: any) => [item.id, item.state]), [["stable-a", "working"], ["stable-b", "blocked"]]);
+		assert.equal(snapshots[0].items[1].message, "pi-subagents background work needs attention");
 
 		runs = runs.map((run) => run.id === "stable-a" ? { ...run, status: "complete" } : run);
 		events.emit(SUBAGENT_ASYNC_COMPLETE_EVENT, { runId: "stable-a" });
@@ -43,7 +44,36 @@ describe("Herdr background adapter", () => {
 		events.emit(SUBAGENT_ASYNC_STARTED_EVENT, { id: "paused" });
 		events.emit(SUBAGENT_ASYNC_STARTED_EVENT, { id: "paused" });
 		await new Promise<void>((resolve) => queueMicrotask(resolve));
-		assert.deepEqual(snapshots.at(-1).items.map((item: any) => item.id), ["stable-b", "paused"]);
+		assert.deepEqual(snapshots.at(-1).items.map((item: any) => item.id), ["paused", "stable-b"]);
+		adapter.dispose();
+	});
+
+	it("projects attention authoritatively with deterministic, private messages", async () => {
+		const events = new Events();
+		let runs: HerdrBackgroundRun[] = [
+			{ id: "/private/path?token=secret", status: "running", sessionId: "session", needsAttention: true },
+			{ id: "a-working", status: "running", sessionId: "session" },
+			{ id: "z-blocked", status: "running", sessionId: "session", needsAttention: true },
+		];
+		const snapshots: any[] = [];
+		events.on(HERDR_BACKGROUND_SNAPSHOT_EVENT, (snapshot) => snapshots.push(snapshot));
+		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs });
+		adapter.sessionStarted("session");
+
+		assert.deepEqual(snapshots.at(-1).items.map((item: any) => [item.id, item.state]), [
+			["/private/path?token=secret", "blocked"], ["a-working", "working"], ["z-blocked", "blocked"],
+		]);
+		assert.deepEqual(snapshots.at(-1).items.filter((item: any) => item.state === "blocked").map((item: any) => item.message), [
+			"2 pi-subagents background runs need attention", "2 pi-subagents background runs need attention",
+		]);
+		assert.doesNotMatch(JSON.stringify(snapshots.at(-1).items.map((item: any) => item.message)), /private|token|secret/);
+
+		adapter.agentStarted();
+		assert.equal(snapshots.at(-1).items[0].state, "blocked", "a foreground turn must not acknowledge persistent attention");
+		runs = runs.map((run) => ({ ...run, needsAttention: false }));
+		events.emit(SUBAGENT_ASYNC_ACTIVITY_CHANGED_EVENT, { runId: "z-blocked", from: "needs_attention", to: undefined });
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+		assert.ok(snapshots.at(-1).items.every((item: any) => item.state === "working"));
 		adapter.dispose();
 	});
 

@@ -77,6 +77,56 @@ describe("Herdr lifecycle authority socket integration", () => {
 		authority.dispose();
 	});
 
+	it("reports background attention transitions with foreground-message precedence", async () => {
+		const socket = await recordingSocket();
+		const events = new Events();
+		let runs: HerdrBackgroundRun[] = [];
+		const authority = registerHerdrLifecycleAuthority({
+			enabled: true,
+			events,
+			env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: socket.socketPath },
+			officialIntegrationPath: path.join(path.dirname(socket.socketPath), "absent.ts"),
+		});
+		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs });
+		adapter.sessionStarted("session-1");
+		await authority.sessionStarted({ reason: "startup" }, context());
+
+		runs = [{ id: "working", status: "running", sessionId: "session-1" }];
+		adapter.publish();
+		runs[0] = { ...runs[0], needsAttention: false }; // active_long_running is still ordinary work
+		adapter.publish();
+		runs[0] = { ...runs[0], needsAttention: true };
+		adapter.publish();
+		runs[0] = { ...runs[0], needsAttention: false };
+		adapter.publish();
+		runs = [
+			{ id: "z-blocked", status: "running", sessionId: "session-1", needsAttention: true },
+			{ id: "a-blocked", status: "queued", sessionId: "session-1", needsAttention: true },
+		];
+		adapter.publish();
+		events.emit("herdr:blocked", { active: true, label: "Approve foreground action?" });
+		runs[1] = { ...runs[1], needsAttention: false };
+		adapter.publish();
+		events.emit("herdr:blocked", { active: false });
+		runs = runs.map((run) => ({ ...run, status: "complete" }));
+		adapter.publish();
+		await authority.flush();
+
+		assert.deepEqual(socket.requests.filter((request) => request.method === "pane.report_agent").map((request) => [request.params.state, request.params.message]), [
+			["idle", undefined],
+			["working", undefined],
+			["blocked", "pi-subagents background work needs attention"],
+			["working", undefined],
+			["blocked", "2 pi-subagents background runs need attention"],
+			["blocked", "Approve foreground action?"],
+			["blocked", "pi-subagents background work needs attention"],
+			["idle", undefined],
+		]);
+		assert.doesNotMatch(JSON.stringify(socket.requests), /z-blocked|a-blocked/);
+		adapter.dispose();
+		authority.dispose();
+	});
+
 	it("keeps a settled parent working across concurrent async-root transitions", async () => {
 		const socket = await recordingSocket();
 		const events = new Events();

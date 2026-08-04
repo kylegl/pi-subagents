@@ -1262,6 +1262,36 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 		}
 	});
 
+	it("emits authoritative activity changes when attention clears", async () => {
+		const asyncRoot = createTempDir("pi-async-job-tracker-");
+		try {
+			const runDir = path.join(asyncRoot, "run-activity");
+			fs.mkdirSync(runDir, { recursive: true });
+			const statusPath = path.join(runDir, "status.json");
+			const writeStatus = (activityState?: "needs_attention") => fs.writeFileSync(statusPath, JSON.stringify({
+				runId: "run-activity",
+				mode: "single",
+				state: "running",
+				startedAt: Date.now() - 1000,
+				lastUpdate: Date.now(),
+				...(activityState ? { activityState } : {}),
+				steps: [{ agent: "worker", status: "running", ...(activityState ? { activityState } : {}) }],
+			}), "utf-8");
+			writeStatus("needs_attention");
+
+			const state = createState();
+			const recorder = createEventRecorder();
+			const tracker = trackerMod!.createAsyncJobTracker(recorder.pi, state as never, asyncRoot, { pollIntervalMs: 10 });
+			tracker.handleStarted({ id: "run-activity", asyncDir: runDir, agent: "worker" });
+			await waitForCondition(() => recorder.events.some((event) => event.channel === "subagent:async-activity-changed" && (event.data as any).to === "needs_attention"), "attention activity event");
+
+			writeStatus();
+			await waitForCondition(() => recorder.events.some((event) => event.channel === "subagent:async-activity-changed" && (event.data as any).from === "needs_attention" && (event.data as any).to === undefined), "cleared activity event");
+		} finally {
+			removeTempDir(asyncRoot);
+		}
+	});
+
 	it("bridges async control events from events.jsonl to the parent event bus", async () => {
 		const asyncRoot = createTempDir("pi-async-job-tracker-");
 		try {

@@ -5,6 +5,7 @@ import {
 	type HerdrLifecycleEvents,
 } from "./herdr-lifecycle-authority.ts";
 import {
+	SUBAGENT_ASYNC_ACTIVITY_CHANGED_EVENT,
 	SUBAGENT_ASYNC_COMPLETE_EVENT,
 	SUBAGENT_ASYNC_STARTED_EVENT,
 	SUBAGENT_CONTROL_EVENT,
@@ -38,7 +39,6 @@ export function registerHerdrBackgroundAdapter(options: {
 	let sessionId: string | undefined;
 	let refreshTimer: ReturnType<typeof setInterval> | undefined;
 	let disposed = false;
-	const acknowledgedAttention = new Set<string>();
 	const unsubscribes: Array<() => void> = [];
 	const currentRoots = () => {
 		if (!sessionId) return [];
@@ -49,25 +49,23 @@ export function registerHerdrBackgroundAdapter(options: {
 			const existing = roots.get(run.id);
 			if (!existing || run.needsAttention === true) roots.set(run.id, run);
 		}
-		return [...roots.values()];
+		return [...roots.values()].sort((a, b) => a.id.localeCompare(b.id));
 	};
 	const publish = () => {
 		if (!options.enabled || disposed || !sessionId) return;
 		const runs = currentRoots();
-		const activeIds = new Set(runs.map((run) => run.id));
-		for (const id of acknowledgedAttention) if (!activeIds.has(id)) acknowledgedAttention.delete(id);
-		for (const run of runs) if (!run.needsAttention) acknowledgedAttention.delete(run.id);
+		const blockedCount = runs.filter((run) => run.needsAttention === true).length;
+		const blockedMessage = blockedCount === 1
+			? "pi-subagents background work needs attention"
+			: `${blockedCount} pi-subagents background runs need attention`;
 		const snapshot: HerdrBackgroundSnapshot = {
 			provider: "pi-subagents",
 			sessionId,
-			items: runs.map((run) => {
-				const blocked = run.needsAttention === true && !acknowledgedAttention.has(run.id);
-				return {
-					id: run.id,
-					state: blocked ? "blocked" : "working",
-					...(blocked ? { message: `pi-subagents run ${run.id.slice(0, 24)} needs attention` } : {}),
-				};
-			}),
+			items: runs.map((run) => ({
+				id: run.id,
+				state: run.needsAttention === true ? "blocked" : "working",
+				...(run.needsAttention === true ? { message: blockedMessage } : {}),
+			})),
 		};
 		options.events.emit(HERDR_BACKGROUND_SNAPSHOT_EVENT, snapshot);
 	};
@@ -82,25 +80,18 @@ export function registerHerdrBackgroundAdapter(options: {
 		});
 		const publishAfterEventReconciliation = () => queueMicrotask(publish);
 		on(SUBAGENT_ASYNC_STARTED_EVENT, publishAfterEventReconciliation);
-		on(SUBAGENT_ASYNC_COMPLETE_EVENT, (data) => {
-			if (record(data)) {
-				const id = typeof data.runId === "string" ? data.runId : typeof data.id === "string" ? data.id : undefined;
-				if (id) acknowledgedAttention.delete(id);
-			}
-			publishAfterEventReconciliation();
-		});
+		on(SUBAGENT_ASYNC_COMPLETE_EVENT, publishAfterEventReconciliation);
+		on(SUBAGENT_ASYNC_ACTIVITY_CHANGED_EVENT, publishAfterEventReconciliation);
 		on(SUBAGENT_CONTROL_EVENT, (data) => {
-			if (record(data) && data.source === "async" && record(data.event) && data.event.type === "needs_attention" && typeof data.event.runId === "string") {
-				acknowledgedAttention.delete(data.event.runId);
+			if (record(data) && data.source === "async" && record(data.event) && data.event.type === "needs_attention") {
+				publishAfterEventReconciliation();
 			}
-			publishAfterEventReconciliation();
 		});
 	}
 	return {
 		sessionStarted(nextSessionId: string) {
 			if (disposed) return;
 			sessionId = nextSessionId;
-			acknowledgedAttention.clear();
 			publish();
 			if (options.enabled && refreshMs > 0 && !refreshTimer) {
 				refreshTimer = timers.setInterval(publish, refreshMs);
@@ -109,7 +100,6 @@ export function registerHerdrBackgroundAdapter(options: {
 		},
 		agentStarted() {
 			if (disposed) return;
-			for (const run of currentRoots()) if (run.needsAttention) acknowledgedAttention.add(run.id);
 			publish();
 		},
 		publish,
@@ -119,7 +109,6 @@ export function registerHerdrBackgroundAdapter(options: {
 			if (refreshTimer) timers.clearInterval(refreshTimer);
 			refreshTimer = undefined;
 			sessionId = undefined;
-			acknowledgedAttention.clear();
 			for (const unsub of unsubscribes) unsub();
 		},
 	};
