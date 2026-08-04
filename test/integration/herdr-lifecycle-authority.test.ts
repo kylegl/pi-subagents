@@ -5,10 +5,12 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { registerHerdrBackgroundAdapter, type HerdrBackgroundRun } from "../../src/integrations/herdr-background-adapter.ts";
 import {
 	HERDR_BACKGROUND_SNAPSHOT_EVENT,
 	registerHerdrLifecycleAuthority,
 } from "../../src/integrations/herdr-lifecycle-authority.ts";
+import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_ASYNC_STARTED_EVENT } from "../../src/shared/types.ts";
 
 class Events {
 	private readonly emitter = new EventEmitter();
@@ -71,6 +73,42 @@ describe("Herdr lifecycle authority socket integration", () => {
 		assert.ok(socket.requests.every((request) => request.params.agent_session_id === "session-1"));
 		const sequences = socket.requests.map((request) => request.params.seq);
 		assert.deepEqual(sequences, [...sequences].sort((a, b) => a - b));
+		authority.dispose();
+	});
+
+	it("keeps a settled parent working across concurrent async-root transitions", async () => {
+		const socket = await recordingSocket();
+		const events = new Events();
+		let runs: HerdrBackgroundRun[] = [];
+		const authority = registerHerdrLifecycleAuthority({
+			enabled: true,
+			events,
+			env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: socket.socketPath },
+			officialIntegrationPath: path.join(path.dirname(socket.socketPath), "absent.ts"),
+		});
+		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs });
+		adapter.sessionStarted("session-1");
+		await authority.sessionStarted({ reason: "startup" }, context("session-1", false));
+
+		runs = [{ id: "root-a", status: "running", sessionId: "session-1" }];
+		events.emit(SUBAGENT_ASYNC_STARTED_EVENT, { id: "root-a" });
+		events.emit(SUBAGENT_ASYNC_STARTED_EVENT, { id: "root-a" });
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+		authority.agentSettled(context());
+		runs.push({ id: "root-b", status: "queued", sessionId: "session-1" });
+		events.emit(SUBAGENT_ASYNC_STARTED_EVENT, { id: "root-b" });
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+		runs = runs.map((run) => run.id === "root-a" ? { ...run, status: "complete" } : run);
+		events.emit(SUBAGENT_ASYNC_COMPLETE_EVENT, { runId: "root-a" });
+		events.emit(SUBAGENT_ASYNC_COMPLETE_EVENT, { runId: "root-a" });
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+		runs = runs.map((run) => run.id === "root-b" ? { ...run, status: "failed" } : run);
+		events.emit(SUBAGENT_ASYNC_COMPLETE_EVENT, { runId: "root-b" });
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+		await authority.flush();
+
+		assert.deepEqual(socket.requests.filter((request) => request.method === "pane.report_agent").map((request) => request.params.state), ["working", "idle"]);
+		adapter.dispose();
 		authority.dispose();
 	});
 

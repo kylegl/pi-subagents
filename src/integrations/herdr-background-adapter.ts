@@ -12,6 +12,9 @@ import {
 
 export interface HerdrBackgroundRun {
 	id: string;
+	status: "queued" | "running" | "complete" | "failed" | "paused" | "stopped" | "rejected";
+	sessionId?: string;
+	parentWorkflowRunId?: string;
 	needsAttention?: boolean;
 }
 
@@ -28,9 +31,20 @@ export function registerHerdrBackgroundAdapter(options: {
 	let sessionId: string | undefined;
 	const acknowledgedAttention = new Set<string>();
 	const unsubscribes: Array<() => void> = [];
+	const currentRoots = () => {
+		if (!sessionId) return [];
+		const roots = new Map<string, HerdrBackgroundRun>();
+		for (const run of options.getRuns()) {
+			if (run.sessionId !== sessionId || run.parentWorkflowRunId) continue;
+			if (run.status !== "queued" && run.status !== "running") continue;
+			const existing = roots.get(run.id);
+			if (!existing || run.needsAttention === true) roots.set(run.id, run);
+		}
+		return [...roots.values()];
+	};
 	const publish = () => {
 		if (!options.enabled || !sessionId) return;
-		const runs = [...options.getRuns()];
+		const runs = currentRoots();
 		const activeIds = new Set(runs.map((run) => run.id));
 		for (const id of acknowledgedAttention) if (!activeIds.has(id)) acknowledgedAttention.delete(id);
 		for (const run of runs) if (!run.needsAttention) acknowledgedAttention.delete(run.id);
@@ -75,7 +89,7 @@ export function registerHerdrBackgroundAdapter(options: {
 	}
 	return {
 		sessionStarted(nextSessionId: string) { sessionId = nextSessionId; acknowledgedAttention.clear(); publish(); },
-		agentStarted() { for (const run of options.getRuns()) if (run.needsAttention) acknowledgedAttention.add(run.id); publish(); },
+		agentStarted() { for (const run of currentRoots()) if (run.needsAttention) acknowledgedAttention.add(run.id); publish(); },
 		publish,
 		dispose() { acknowledgedAttention.clear(); for (const unsub of unsubscribes) unsub(); },
 	};

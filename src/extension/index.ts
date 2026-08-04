@@ -467,13 +467,15 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	const existingVisibleControlNotices = globalStore[controlNoticeSeenStoreKey];
 	const visibleControlNotices = existingVisibleControlNotices instanceof Set ? existingVisibleControlNotices as Set<string> : new Set<string>();
 	globalStore[controlNoticeSeenStoreKey] = visibleControlNotices;
-	const activeHerdrRuns = () => [...state.asyncJobs.values()]
-		.filter((job) => job.status === "queued" || job.status === "running")
-		.map((job) => ({
-			id: job.asyncId,
-			agents: job.agents,
-			needsAttention: job.activityState === "needs_attention",
-		}));
+	const herdrRuns = () => [...state.asyncJobs.values()].map((job) => ({
+		id: job.asyncId,
+		status: job.status,
+		sessionId: job.sessionId,
+		parentWorkflowRunId: job.parentWorkflowRunId,
+		agents: job.agents,
+		needsAttention: job.activityState === "needs_attention",
+	}));
+	const activeHerdrRuns = () => herdrRuns().filter((job) => job.status === "queued" || job.status === "running");
 	const herdrAuthorityEnabled = config.herdrLifecycleAuthority === true;
 	const herdrStatusBridge = registerHerdrStatusBridge({
 		events: pi.events,
@@ -490,7 +492,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	const herdrBackgroundAdapter = registerHerdrBackgroundAdapter({
 		enabled: herdrAuthorityEnabled,
 		events: pi.events,
-		getRuns: activeHerdrRuns,
+		getRuns: herdrRuns,
 	});
 	const controlEventHandler = (payload: unknown) => {
 		handleSubagentControlNotice({

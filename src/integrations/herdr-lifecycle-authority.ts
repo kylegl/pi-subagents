@@ -171,10 +171,11 @@ export function registerHerdrLifecycleAuthority(options: AuthorityOptions) {
 		async sessionStarted(event: { reason?: string }, ctx: HerdrSessionContext): Promise<void> {
 			if (!options.enabled || !inHerdr || conflict || disposed || ctx.mode !== "tui") return;
 			status = "active"; rootSession = true; providers.clear(); updateSession(ctx);
+			lastState = undefined; lastMessage = undefined;
 			enqueue(request("pane.report_agent_session", { ...sessionRef(), ...(event.reason ? { session_start_source: event.reason } : {}) }));
 			foregroundActive = ctx.isIdle?.() === false;
 			options.events.emit(HERDR_BACKGROUND_REFRESH_EVENT, { sessionId: sessionScopeId });
-			publish(true);
+			publish();
 			await queue;
 		},
 		agentStarted(ctx: HerdrSessionContext) { if (!rootSession) return; updateSession(ctx); enqueue(request("pane.report_agent_session", sessionRef())); foregroundActive = true; publish(); },
