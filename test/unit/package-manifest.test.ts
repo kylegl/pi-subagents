@@ -58,6 +58,7 @@ test("published extension APIs use supported package entrypoints", async () => {
 		"./background-work": "./src/api/background-work.ts",
 		"./capability-ceiling": "./src/api/capability-ceiling.ts",
 		"./delegation": "./src/api/delegation.ts",
+		"./herdr-lifecycle": "./src/api/herdr-lifecycle.ts",
 		"./preflight": "./src/api/preflight.ts",
 	});
 	const backgroundWork = await import("pi-subagents/background-work");
@@ -70,6 +71,9 @@ test("published extension APIs use supported package entrypoints", async () => {
 	assert.equal(delegation.SUBAGENT_DELEGATION_PROTOCOL_VERSION, 1);
 	assert.equal(delegation.SUBAGENT_DELEGATION_V2_PROTOCOL_VERSION, 2);
 	assert.equal(delegation.SUBAGENT_DELEGATION_REQUEST_EVENT, "prompt-template:subagent:request");
+	const herdrLifecycle = await import("pi-subagents/herdr-lifecycle");
+	assert.equal(herdrLifecycle.HERDR_BACKGROUND_REFRESH_EVENT, "pi-subagents:herdr-background-refresh");
+	assert.equal(herdrLifecycle.HERDR_BACKGROUND_SNAPSHOT_EVENT, "pi-subagents:herdr-background-snapshot");
 	const preflight = await import("pi-subagents/preflight");
 	assert.equal(preflight.SUBAGENT_LAUNCH_CONTRACT_VERSION, 2);
 	assert.equal(typeof preflight.resolveSubagentLaunchContract, "function");
