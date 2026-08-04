@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
-import { registerHerdrBackgroundAdapter, type HerdrBackgroundRun } from "../../src/integrations/herdr-background-adapter.ts";
+import {
+	registerHerdrBackgroundAdapter,
+	type HerdrBackgroundRun,
+	type HerdrBackgroundTimers,
+} from "../../src/integrations/herdr-background-adapter.ts";
 import { HERDR_BACKGROUND_REFRESH_EVENT, HERDR_BACKGROUND_SNAPSHOT_EVENT } from "../../src/integrations/herdr-lifecycle-authority.ts";
 import { SUBAGENT_ASYNC_ACTIVITY_CHANGED_EVENT, SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_ASYNC_STARTED_EVENT } from "../../src/shared/types.ts";
 
@@ -83,8 +87,7 @@ describe("Herdr background adapter", () => {
 		const snapshots: any[] = [];
 		let refresh: (() => void) | undefined;
 		let cleared = 0;
-		const timerHandle = setTimeout(() => {}, 0);
-		clearTimeout(timerHandle);
+		const timerHandle = { unref() {} };
 		events.on(HERDR_BACKGROUND_SNAPSHOT_EVENT, (snapshot) => snapshots.push(snapshot));
 		const adapter = registerHerdrBackgroundAdapter({
 			enabled: true,
@@ -92,8 +95,15 @@ describe("Herdr background adapter", () => {
 			getRuns: () => runs,
 			refreshMs: 10,
 			timers: {
-				setInterval(handler: () => void) { refresh = handler; return timerHandle; },
-				clearInterval() { cleared += 1; },
+				setInterval(callback, delayMs) {
+					assert.equal(delayMs, 10);
+					refresh = callback;
+					return timerHandle;
+				},
+				clearInterval(handle) {
+					assert.equal(handle, timerHandle);
+					cleared += 1;
+				},
 			},
 		});
 
@@ -117,6 +127,14 @@ describe("Herdr background adapter", () => {
 		adapter.sessionStarted("session-a");
 		assert.equal(snapshots.length, countAtDispose, "a replaced adapter cannot republish stale state");
 		assert.equal(cleared, 1);
+	});
+
+	it("accepts production global timers through the narrowed timer dependency", () => {
+		const timers: HerdrBackgroundTimers = globalThis;
+		const events = new Events();
+		const adapter = registerHerdrBackgroundAdapter({ enabled: false, events, getRuns: () => [], timers });
+		adapter.sessionStarted("session");
+		adapter.dispose();
 	});
 
 	it("does nothing while disabled", () => {

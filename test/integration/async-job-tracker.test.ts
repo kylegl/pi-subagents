@@ -31,11 +31,14 @@ interface AsyncJobTrackerModule {
 const trackerMod = await tryImport<AsyncJobTrackerModule>("./src/runs/background/async-job-tracker.ts");
 const available = !!trackerMod;
 
+function nullableString(value: string | null = null): string | null {
+	return value;
+}
+
 function createState() {
-	const currentSessionId: string | null = null;
 	return {
 		baseCwd: "/repo",
-		currentSessionId,
+		currentSessionId: nullableString(),
 		asyncJobs: new Map(),
 		fleetJobs: new Map(),
 		foregroundRuns: new Map(),

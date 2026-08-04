@@ -19,25 +19,30 @@ export interface HerdrBackgroundRun {
 	needsAttention?: boolean;
 }
 
+export interface HerdrBackgroundTimerHandle {
+	unref?(): void;
+}
+
+export interface HerdrBackgroundTimers<TimerHandle extends HerdrBackgroundTimerHandle = ReturnType<typeof setInterval>> {
+	setInterval(callback: () => void, delayMs: number): TimerHandle;
+	clearInterval(handle: TimerHandle): void;
+}
+
 function record(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Projects complete, current-session async state into the generic authority seam. */
-export function registerHerdrBackgroundAdapter(options: {
+export function registerHerdrBackgroundAdapter<TimerHandle extends HerdrBackgroundTimerHandle = ReturnType<typeof setInterval>>(options: {
 	enabled: boolean;
 	events: HerdrLifecycleEvents;
 	getRuns: () => Iterable<HerdrBackgroundRun>;
 	refreshMs?: number;
-	timers?: {
-		setInterval: typeof setInterval;
-		clearInterval: typeof clearInterval;
-	};
+	timers?: HerdrBackgroundTimers<TimerHandle>;
 }) {
 	const refreshMs = options.refreshMs ?? 1_000;
-	const timers = options.timers ?? globalThis;
 	let sessionId: string | undefined;
-	let refreshTimer: ReturnType<typeof setInterval> | undefined;
+	let clearRefreshTimer: (() => void) | undefined;
 	let disposed = false;
 	const unsubscribes: Array<() => void> = [];
 	const currentRoots = () => {
@@ -93,9 +98,17 @@ export function registerHerdrBackgroundAdapter(options: {
 			if (disposed) return;
 			sessionId = nextSessionId;
 			publish();
-			if (options.enabled && refreshMs > 0 && !refreshTimer) {
-				refreshTimer = timers.setInterval(publish, refreshMs);
-				refreshTimer.unref?.();
+			if (options.enabled && refreshMs > 0 && !clearRefreshTimer) {
+				const injectedTimers = options.timers;
+				if (injectedTimers) {
+					const handle = injectedTimers.setInterval(publish, refreshMs);
+					handle.unref?.();
+					clearRefreshTimer = () => injectedTimers.clearInterval(handle);
+				} else {
+					const handle = globalThis.setInterval(publish, refreshMs);
+					handle.unref?.();
+					clearRefreshTimer = () => globalThis.clearInterval(handle);
+				}
 			}
 		},
 		agentStarted() {
@@ -106,8 +119,8 @@ export function registerHerdrBackgroundAdapter(options: {
 		dispose() {
 			if (disposed) return;
 			disposed = true;
-			if (refreshTimer) timers.clearInterval(refreshTimer);
-			refreshTimer = undefined;
+			clearRefreshTimer?.();
+			clearRefreshTimer = undefined;
 			sessionId = undefined;
 			for (const unsub of unsubscribes) unsub();
 		},
