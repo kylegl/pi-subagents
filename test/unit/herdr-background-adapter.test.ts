@@ -13,6 +13,7 @@ class Events {
 	private emitter = new EventEmitter();
 	on(event: string, handler: (data: unknown) => void) { this.emitter.on(event, handler); return () => this.emitter.off(event, handler); }
 	emit(event: string, data: unknown) { this.emitter.emit(event, data); }
+	listenerCount() { return this.emitter.eventNames().reduce((count, event) => count + this.emitter.listenerCount(event), 0); }
 }
 
 describe("Herdr background adapter", () => {
@@ -137,12 +138,45 @@ describe("Herdr background adapter", () => {
 		adapter.dispose();
 	});
 
+	it("stays fully inert until an active authority starts its session", () => {
+		const events = new Events();
+		let reads = 0;
+		let timerStarts = 0;
+		const adapter = registerHerdrBackgroundAdapter({
+			enabled: true,
+			events,
+			getRuns: () => { reads += 1; return []; },
+			timers: {
+				setInterval() { timerStarts += 1; return {}; },
+				clearInterval() {},
+			},
+		});
+		assert.equal(events.listenerCount(), 0);
+		adapter.agentStarted();
+		adapter.publish();
+		assert.equal(reads, 0);
+		assert.equal(timerStarts, 0);
+		adapter.dispose();
+	});
+
 	it("does nothing while disabled", () => {
 		const events = new Events();
-		const snapshots: unknown[] = [];
-		events.on(HERDR_BACKGROUND_SNAPSHOT_EVENT, (snapshot) => snapshots.push(snapshot));
-		const adapter = registerHerdrBackgroundAdapter({ enabled: false, events, getRuns: () => [{ id: "run", status: "running", sessionId: "session" }] });
+		let reads = 0;
+		let timerStarts = 0;
+		const adapter = registerHerdrBackgroundAdapter({
+			enabled: false,
+			events,
+			getRuns: () => { reads += 1; return [{ id: "run", status: "running", sessionId: "session" }]; },
+			timers: {
+				setInterval() { timerStarts += 1; return {}; },
+				clearInterval() {},
+			},
+		});
 		adapter.sessionStarted("session");
-		assert.deepEqual(snapshots, []);
+		adapter.agentStarted();
+		adapter.publish();
+		assert.equal(events.listenerCount(), 0);
+		assert.equal(reads, 0);
+		assert.equal(timerStarts, 0);
 	});
 });

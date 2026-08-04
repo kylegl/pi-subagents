@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { registerHerdrBackgroundAdapter, type HerdrBackgroundRun } from "../../src/integrations/herdr-background-adapter.ts";
 import {
+	HERDR_BACKGROUND_REFRESH_EVENT,
 	HERDR_BACKGROUND_SNAPSHOT_EVENT,
 	registerHerdrLifecycleAuthority,
 } from "../../src/integrations/herdr-lifecycle-authority.ts";
@@ -46,6 +47,11 @@ function context(id = "session-1", idle = true) {
 }
 
 describe("Herdr lifecycle authority socket integration", () => {
+	it("exposes package-neutral lifecycle event identifiers", () => {
+		assert.doesNotMatch(HERDR_BACKGROUND_SNAPSHOT_EVENT, /pi-subagents/);
+		assert.doesNotMatch(HERDR_BACKGROUND_REFRESH_EVENT, /pi-subagents/);
+	});
+
 	it("reports official lifecycle shapes and aggregates provider snapshots by precedence", async () => {
 		const socket = await recordingSocket();
 		const events = new Events();
@@ -158,6 +164,37 @@ describe("Herdr lifecycle authority socket integration", () => {
 		await new Promise<void>((resolve) => queueMicrotask(resolve));
 		await authority.flush();
 
+		assert.deepEqual(socket.requests.filter((request) => request.method === "pane.report_agent").map((request) => request.params.state), ["working", "idle"]);
+		adapter.dispose();
+		authority.dispose();
+	});
+
+	it("does not report false idle when completion triggers Pi's automatic wake-up turn", async () => {
+		const socket = await recordingSocket();
+		const events = new Events();
+		let runs: HerdrBackgroundRun[] = [{ id: "root", status: "running", sessionId: "session-1" }];
+		const authority = registerHerdrLifecycleAuthority({
+			enabled: true,
+			events,
+			env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: socket.socketPath },
+			officialIntegrationPath: path.join(path.dirname(socket.socketPath), "absent.ts"),
+		});
+		const adapter = registerHerdrBackgroundAdapter({ enabled: true, events, getRuns: () => runs, refreshMs: 0 });
+		adapter.sessionStarted("session-1");
+		await authority.sessionStarted({ reason: "startup" }, context("session-1", false));
+		authority.agentSettled(context());
+
+		runs = [{ ...runs[0]!, status: "complete" }];
+		events.emit(SUBAGENT_ASYNC_COMPLETE_EVENT, { runId: "root" });
+		// Pi starts its automatic notification turn before the adapter's queued
+		// post-reconciliation snapshot is published.
+		authority.agentStarted(context("session-1", false));
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+		await authority.flush();
+		assert.deepEqual(socket.requests.filter((request) => request.method === "pane.report_agent").map((request) => request.params.state), ["working"]);
+
+		authority.agentSettled(context());
+		await authority.flush();
 		assert.deepEqual(socket.requests.filter((request) => request.method === "pane.report_agent").map((request) => request.params.state), ["working", "idle"]);
 		adapter.dispose();
 		authority.dispose();

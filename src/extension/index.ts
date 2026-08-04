@@ -512,12 +512,14 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			return trackedHerdrRuns();
 		}
 	};
-	const activeHerdrRuns = () => herdrRuns().filter((job) => job.status === "queued" || job.status === "running");
+	const activeTrackedHerdrRuns = () => trackedHerdrRuns().filter((job) => job.status === "queued" || job.status === "running");
 	const herdrAuthorityEnabled = config.herdrLifecycleAuthority === true;
 	const herdrStatusBridge = registerHerdrStatusBridge({
 		events: pi.events,
 		env: herdrAuthorityEnabled ? {} : process.env,
-		getRuns: activeHerdrRuns,
+		// Preserve the legacy bridge's in-memory projection. Artifact-backed
+		// reconciliation belongs exclusively to the opt-in lifecycle adapter.
+		getRuns: activeTrackedHerdrRuns,
 		async runHerdr(args) {
 			await pi.exec(process.env.HERDR_BIN || "herdr", [...args], { timeout: 5_000 });
 		},
@@ -642,10 +644,14 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		resetSessionState(ctx, recovering);
 		herdrStatusBridge.sessionStarted({
 			hasUI: ctx.hasUI === true,
-			runs: activeHerdrRuns(),
+			runs: activeTrackedHerdrRuns(),
 		});
-		if (state.currentSessionId) herdrBackgroundAdapter.sessionStarted(state.currentSessionId);
 		await herdrLifecycleAuthority.sessionStarted(event, ctx);
+		// Activating after the authority's environment/TUI/conflict checks keeps
+		// artifact reconciliation fully inert everywhere the authority is inactive.
+		if (herdrLifecycleAuthority.status === "active" && state.currentSessionId) {
+			herdrBackgroundAdapter.sessionStarted(state.currentSessionId);
+		}
 		rpcBridge.emitReady(ctx);
 		supervisorChannel.start();
 	});

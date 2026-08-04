@@ -44,6 +44,7 @@ export function registerHerdrBackgroundAdapter<TimerHandle extends HerdrBackgrou
 	let sessionId: string | undefined;
 	let clearRefreshTimer: (() => void) | undefined;
 	let disposed = false;
+	let active = false;
 	const unsubscribes: Array<() => void> = [];
 	const currentRoots = () => {
 		if (!sessionId) return [];
@@ -57,7 +58,7 @@ export function registerHerdrBackgroundAdapter<TimerHandle extends HerdrBackgrou
 		return [...roots.values()].sort((a, b) => a.id.localeCompare(b.id));
 	};
 	const publish = () => {
-		if (!options.enabled || disposed || !sessionId) return;
+		if (!active || disposed || !sessionId) return;
 		const runs = currentRoots();
 		const blockedCount = runs.filter((run) => run.needsAttention === true).length;
 		const blockedMessage = blockedCount === 1
@@ -78,7 +79,9 @@ export function registerHerdrBackgroundAdapter<TimerHandle extends HerdrBackgrou
 		const unsub = options.events.on(event, handler);
 		if (typeof unsub === "function") unsubscribes.push(unsub);
 	};
-	if (options.enabled) {
+	const activate = () => {
+		if (active || disposed || !options.enabled) return;
+		active = true;
 		on(HERDR_BACKGROUND_REFRESH_EVENT, (data) => {
 			if (!record(data) || typeof data.sessionId !== "string" || data.sessionId !== sessionId) return;
 			publish();
@@ -92,13 +95,14 @@ export function registerHerdrBackgroundAdapter<TimerHandle extends HerdrBackgrou
 				publishAfterEventReconciliation();
 			}
 		});
-	}
+	};
 	return {
 		sessionStarted(nextSessionId: string) {
-			if (disposed) return;
+			if (disposed || !options.enabled) return;
+			activate();
 			sessionId = nextSessionId;
 			publish();
-			if (options.enabled && refreshMs > 0 && !clearRefreshTimer) {
+			if (refreshMs > 0 && !clearRefreshTimer) {
 				const injectedTimers = options.timers;
 				if (injectedTimers) {
 					const handle = injectedTimers.setInterval(publish, refreshMs);
@@ -119,6 +123,7 @@ export function registerHerdrBackgroundAdapter<TimerHandle extends HerdrBackgrou
 		dispose() {
 			if (disposed) return;
 			disposed = true;
+			active = false;
 			clearRefreshTimer?.();
 			clearRefreshTimer = undefined;
 			sessionId = undefined;

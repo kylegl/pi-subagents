@@ -72,8 +72,8 @@ test("published extension APIs use supported package entrypoints", async () => {
 	assert.equal(delegation.SUBAGENT_DELEGATION_V2_PROTOCOL_VERSION, 2);
 	assert.equal(delegation.SUBAGENT_DELEGATION_REQUEST_EVENT, "prompt-template:subagent:request");
 	const herdrLifecycle = await import("pi-subagents/herdr-lifecycle");
-	assert.equal(herdrLifecycle.HERDR_BACKGROUND_REFRESH_EVENT, "pi-subagents:herdr-background-refresh");
-	assert.equal(herdrLifecycle.HERDR_BACKGROUND_SNAPSHOT_EVENT, "pi-subagents:herdr-background-snapshot");
+	assert.equal(herdrLifecycle.HERDR_BACKGROUND_REFRESH_EVENT, "herdr:lifecycle-background-refresh");
+	assert.equal(herdrLifecycle.HERDR_BACKGROUND_SNAPSHOT_EVENT, "herdr:lifecycle-background-snapshot");
 	assert.deepEqual(herdrLifecycle.HERDR_LIFECYCLE_PROVENANCE, {
 		repository: "herdrdev/herdr",
 		path: "src/integration/assets/pi/herdr-agent-state.ts",

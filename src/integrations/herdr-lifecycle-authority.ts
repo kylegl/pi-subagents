@@ -4,8 +4,8 @@ import * as net from "node:net";
 import * as path from "node:path";
 import { getAgentDir } from "../shared/utils.ts";
 
-export const HERDR_BACKGROUND_SNAPSHOT_EVENT = "pi-subagents:herdr-background-snapshot";
-export const HERDR_BACKGROUND_REFRESH_EVENT = "pi-subagents:herdr-background-refresh";
+export const HERDR_BACKGROUND_SNAPSHOT_EVENT = "herdr:lifecycle-background-snapshot";
+export const HERDR_BACKGROUND_REFRESH_EVENT = "herdr:lifecycle-background-refresh";
 /** Pinned upstream baseline for reviewing changes while this temporary fork exists. */
 export const HERDR_LIFECYCLE_PROVENANCE = Object.freeze({
 	repository: "herdrdev/herdr",
