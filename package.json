@@ -41,7 +41,8 @@
     "skills/**/*",
     "prompts/**/*",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "THIRD_PARTY_LICENSES/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

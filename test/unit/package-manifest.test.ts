@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,6 +85,24 @@ test("published extension APIs use supported package entrypoints", async () => {
 	const preflight = await import("pi-subagents/preflight");
 	assert.equal(preflight.SUBAGENT_LAUNCH_CONTRACT_VERSION, 2);
 	assert.equal(typeof preflight.resolveSubagentLaunchContract, "function");
+});
+
+test("published package includes the pinned Herdr license and provenance", () => {
+	const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf-8"));
+	const attributionDir = path.join(projectRoot, "THIRD_PARTY_LICENSES", "herdr");
+	const license = fs.readFileSync(path.join(attributionDir, "LICENSE"), "utf-8");
+	const notice = fs.readFileSync(path.join(attributionDir, "NOTICE.md"), "utf-8");
+
+	assert.equal(packageJson.license, "MIT", "the project license must remain MIT");
+	assert.equal(packageJson.files?.includes("THIRD_PARTY_LICENSES/"), true);
+	assert.equal(
+		createHash("sha256").update(license).digest("hex"),
+		"c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+		"the redistributed license must exactly match the pinned upstream file",
+	);
+	assert.match(notice, /5eab32da81b403c2a277222ab97417a8bf90c35f/);
+	assert.match(notice, /src\/integration\/assets\/pi\/herdr-agent-state\.ts/);
+	assert.match(notice, /does not contain a `NOTICE` file/);
 });
 
 test("direct @earendil-works runtime imports are declared for CI installs", () => {

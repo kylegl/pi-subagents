@@ -1,4 +1,6 @@
 // Package-owned fork of Herdr's official Pi lifecycle integration.
+// Modified by the pi-subagents contributors; upstream provenance and Apache-2.0 license:
+// THIRD_PARTY_LICENSES/herdr/NOTICE.md and THIRD_PARTY_LICENSES/herdr/LICENSE
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
