@@ -10,8 +10,7 @@
     "./background-work": "./src/api/background-work.ts",
     "./delegation": "./src/api/delegation.ts",
     "./capability-ceiling": "./src/api/capability-ceiling.ts",
-    "./preflight": "./src/api/preflight.ts",
-    "./herdr-lifecycle": "./src/api/herdr-lifecycle.ts"
+    "./preflight": "./src/api/preflight.ts"
   },
   "repository": {
     "type": "git",
@@ -41,8 +40,7 @@
     "skills/**/*",
     "prompts/**/*",
     "README.md",
-    "CHANGELOG.md",
-    "THIRD_PARTY_LICENSES/"
+    "CHANGELOG.md"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

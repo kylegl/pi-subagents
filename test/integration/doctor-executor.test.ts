@@ -92,47 +92,6 @@ describe("doctor action executor routing", { skip: !createSubagentExecutor ? "ex
 		assert.match(text, /- supervisor channel: available \(native:pi-subagents-supervisor-channel\)/);
 	});
 
-	it("reports Herdr lifecycle authority inactive in a headless runtime", async () => {
-		const originalHerdrEnv = process.env.HERDR_ENV;
-		const originalPaneId = process.env.HERDR_PANE_ID;
-		const originalSocketPath = process.env.HERDR_SOCKET_PATH;
-		process.env.HERDR_ENV = "1";
-		process.env.HERDR_PANE_ID = "doctor-headless-pane";
-		process.env.HERDR_SOCKET_PATH = path.join(tempDir, "unreachable.sock");
-		try {
-			const executor = createSubagentExecutor({
-				pi: { events: createEventBus(), getSessionName: () => undefined },
-				state: makeState(tempDir),
-				config: { herdrLifecycleAuthority: true },
-				asyncByDefault: false,
-				tempArtifactsDir: tempDir,
-				getSubagentSessionRoot: () => tempDir,
-				expandTilde: (value: string) => value,
-				discoverAgents: () => ({ agents: [] }),
-			});
-			const ctx = makeMinimalCtx(tempDir);
-
-			const result = await executor.execute(
-				"doctor-id",
-				{ action: "doctor" },
-				new AbortController().signal,
-				undefined,
-				ctx,
-			);
-
-			const text = result.content[0]?.text ?? "";
-			assert.match(text, /- lifecycle authority: inactive non-TUI runtime/);
-			assert.doesNotMatch(text, /- lifecycle authority: active/);
-		} finally {
-			if (originalHerdrEnv === undefined) delete process.env.HERDR_ENV;
-			else process.env.HERDR_ENV = originalHerdrEnv;
-			if (originalPaneId === undefined) delete process.env.HERDR_PANE_ID;
-			else process.env.HERDR_PANE_ID = originalPaneId;
-			if (originalSocketPath === undefined) delete process.env.HERDR_SOCKET_PATH;
-			else process.env.HERDR_SOCKET_PATH = originalSocketPath;
-		}
-	});
-
 	it("reports session manager failures without failing the doctor action", async () => {
 		const executor = createSubagentExecutor({
 			pi: { events: createEventBus(), getSessionName: () => undefined },

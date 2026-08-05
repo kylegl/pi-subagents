@@ -1,10 +1,8 @@
 import * as fs from "node:fs";
-import * as net from "node:net";
 import * as path from "node:path";
 import { discoverAgentsAll, type AgentSource } from "../agents/agents.ts";
 import { isAsyncAvailable } from "../runs/background/async-execution.ts";
 import { formatSpawnBudgetSummary, getSpawnBudgetSnapshot } from "../runs/shared/spawn-budget.ts";
-import { managedHerdrIntegrationPath } from "../integrations/herdr-lifecycle-authority.ts";
 import { diagnoseIntercomBridge, type IntercomBridgeDiagnostic } from "../intercom/intercom-bridge.ts";
 import { discoverAvailableSkills, type SkillSource } from "../agents/skills.ts";
 import {
@@ -42,12 +40,6 @@ interface DoctorReportInput {
 	expandTilde?: (value: string) => string;
 	paths?: DoctorPaths;
 	deps?: Partial<DoctorDeps>;
-	/** Whether the current invocation is running in Pi's interactive TUI mode. */
-	isTuiRuntime?: boolean;
-	/** Test seam; production diagnostics use the current process environment. */
-	herdrEnv?: NodeJS.ProcessEnv;
-	herdrManagedIntegrationPath?: string;
-	herdrSocketReachable?: (socketPath: string) => boolean | Promise<boolean>;
 }
 
 function defaultPaths(): DoctorPaths {
@@ -183,43 +175,6 @@ function formatSpawnBudgetSection(input: DoctorReportInput): string[] {
 	];
 }
 
-function defaultHerdrSocketReachable(socketPath: string): Promise<boolean> {
-	const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\${socketPath}` : socketPath;
-	return new Promise((resolve) => {
-		let finished = false;
-		const socket = net.createConnection(endpoint);
-		const finish = (reachable: boolean) => {
-			if (finished) return;
-			finished = true;
-			clearTimeout(timer);
-			socket.destroy();
-			resolve(reachable);
-		};
-		const timer = setTimeout(() => finish(false), 300);
-		timer.unref?.();
-		socket.once("connect", () => finish(true));
-		socket.once("error", () => finish(false));
-	});
-}
-
-async function formatHerdrAuthoritySection(input: DoctorReportInput): Promise<string[]> {
-	if (input.config.herdrLifecycleAuthority !== true) return ["- lifecycle authority: disabled (opt in with herdrLifecycleAuthority: true)"];
-	const env = input.herdrEnv ?? process.env;
-	if (env.HERDR_ENV !== "1" || !env.HERDR_PANE_ID) return ["- lifecycle authority: inactive outside Herdr"];
-	if (fs.existsSync(input.herdrManagedIntegrationPath ?? managedHerdrIntegrationPath())) {
-		return ["- lifecycle authority: conflicting-authority — uninstall Herdr's managed Pi integration before activation"];
-	}
-	if (input.isTuiRuntime !== true) {
-		return ["- lifecycle authority: inactive non-TUI runtime — requires a root interactive TUI session"];
-	}
-	const socketPath = env.HERDR_SOCKET_PATH;
-	const socketReachable = input.herdrSocketReachable ?? defaultHerdrSocketReachable;
-	if (!socketPath || !await socketReachable(socketPath)) {
-		return ["- lifecycle authority: socket-unreachable — Herdr reporting is unavailable; Pi and async runs remain functional"];
-	}
-	return ["- lifecycle authority: active (package authority configured and socket endpoint reachable)"];
-}
-
 function formatPermissionSystemSection(): string[] {
 	const lines: string[] = [];
 	const parentSession = process.env["PI_SUBAGENT_PARENT_SESSION"] ?? "";
@@ -237,7 +192,7 @@ function formatPermissionSystemSection(): string[] {
 	return lines;
 }
 
-export async function buildDoctorReport(input: DoctorReportInput): Promise<string> {
+export function buildDoctorReport(input: DoctorReportInput): string {
 	const paths = input.paths ?? defaultPaths();
 	const deps = { ...DEFAULT_DEPS, ...input.deps };
 	const lines = [
@@ -262,9 +217,6 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<strin
 		"",
 		"Permission system",
 		...formatPermissionSystemSection(),
-		"",
-		"Herdr integration",
-		...await formatHerdrAuthoritySection(input),
 		"",
 		"Intercom bridge",
 		...lineFromCheck("intercom bridge", () => formatIntercomDiagnostic(deps.diagnoseIntercomBridge({

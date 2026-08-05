@@ -11,7 +11,6 @@ import {
 	type SubagentState,
 	POLL_INTERVAL_MS,
 	DIRS,
-	SUBAGENT_ASYNC_ACTIVITY_CHANGED_EVENT,
 	SUBAGENT_CONTROL_EVENT,
 	SUBAGENT_CONTROL_INTERCOM_EVENT,
 	SUBAGENT_STEERING_NOTICE_EVENT,
@@ -324,18 +323,10 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 					const status = reconciliation.status ?? readStatus(job.asyncDir);
 					if (status) {
 						const previousStatus = job.status;
-						const previousActivityState = job.activityState;
 						job.status = status.state;
 						if (job.status !== "complete" && job.status !== "failed" && job.status !== "paused" && job.status !== "stopped") cancelCleanup(job.asyncId);
 						job.sessionId = status.sessionId ?? job.sessionId;
 						job.activityState = status.activityState;
-						if (job.activityState !== previousActivityState) {
-							pi.events.emit(SUBAGENT_ASYNC_ACTIVITY_CHANGED_EVENT, {
-								runId: job.asyncId,
-								from: previousActivityState,
-								to: job.activityState,
-							});
-						}
 						job.lastActivityAt = status.lastActivityAt ?? job.lastActivityAt;
 						job.currentTool = status.currentTool;
 						job.currentToolStartedAt = status.currentToolStartedAt;

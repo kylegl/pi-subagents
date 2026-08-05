@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,7 +58,6 @@ test("published extension APIs use supported package entrypoints", async () => {
 		"./background-work": "./src/api/background-work.ts",
 		"./capability-ceiling": "./src/api/capability-ceiling.ts",
 		"./delegation": "./src/api/delegation.ts",
-		"./herdr-lifecycle": "./src/api/herdr-lifecycle.ts",
 		"./preflight": "./src/api/preflight.ts",
 	});
 	const backgroundWork = await import("pi-subagents/background-work");
@@ -72,37 +70,9 @@ test("published extension APIs use supported package entrypoints", async () => {
 	assert.equal(delegation.SUBAGENT_DELEGATION_PROTOCOL_VERSION, 1);
 	assert.equal(delegation.SUBAGENT_DELEGATION_V2_PROTOCOL_VERSION, 2);
 	assert.equal(delegation.SUBAGENT_DELEGATION_REQUEST_EVENT, "prompt-template:subagent:request");
-	const herdrLifecycle = await import("pi-subagents/herdr-lifecycle");
-	assert.equal(herdrLifecycle.HERDR_BACKGROUND_REFRESH_EVENT, "herdr:lifecycle-background-refresh");
-	assert.equal(herdrLifecycle.HERDR_BACKGROUND_SNAPSHOT_EVENT, "herdr:lifecycle-background-snapshot");
-	assert.deepEqual(herdrLifecycle.HERDR_LIFECYCLE_PROVENANCE, {
-		repository: "herdrdev/herdr",
-		path: "src/integration/assets/pi/herdr-agent-state.ts",
-		integrationId: "pi",
-		integrationVersion: 8,
-		commit: "5eab32da81b403c2a277222ab97417a8bf90c35f",
-	});
 	const preflight = await import("pi-subagents/preflight");
 	assert.equal(preflight.SUBAGENT_LAUNCH_CONTRACT_VERSION, 2);
 	assert.equal(typeof preflight.resolveSubagentLaunchContract, "function");
-});
-
-test("published package includes the pinned Herdr license and provenance", () => {
-	const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf-8"));
-	const attributionDir = path.join(projectRoot, "THIRD_PARTY_LICENSES", "herdr");
-	const license = fs.readFileSync(path.join(attributionDir, "LICENSE"), "utf-8");
-	const notice = fs.readFileSync(path.join(attributionDir, "NOTICE.md"), "utf-8");
-
-	assert.equal(packageJson.license, "MIT", "the project license must remain MIT");
-	assert.equal(packageJson.files?.includes("THIRD_PARTY_LICENSES/"), true);
-	assert.equal(
-		createHash("sha256").update(license).digest("hex"),
-		"c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
-		"the redistributed license must exactly match the pinned upstream file",
-	);
-	assert.match(notice, /5eab32da81b403c2a277222ab97417a8bf90c35f/);
-	assert.match(notice, /src\/integration\/assets\/pi\/herdr-agent-state\.ts/);
-	assert.match(notice, /does not contain a `NOTICE` file/);
 });
 
 test("direct @earendil-works runtime imports are declared for CI installs", () => {

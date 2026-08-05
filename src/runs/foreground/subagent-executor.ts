@@ -4246,11 +4246,10 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				return {
 					content: [{
 						type: "text",
-						text: await buildDoctorReport(omitUndefinedProperties({
+						text: buildDoctorReport(omitUndefinedProperties({
 							cwd: requestCwd,
 							config: deps.config,
 							state: deps.state,
-							isTuiRuntime: ctx.mode === "tui",
 							context: paramsWithResolvedCwd.context,
 							requestedSessionDir: paramsWithResolvedCwd.sessionDir,
 							currentSessionFile,

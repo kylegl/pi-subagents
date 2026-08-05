@@ -38,12 +38,9 @@ import { registerMainWatchdog } from "../watchdog/register-main.ts";
 import { registerSlashSubagentBridge } from "../slash/slash-bridge.ts";
 import { createNativeSupervisorChannel } from "../intercom/native-supervisor-channel.ts";
 import { registerHerdrStatusBridge } from "../integrations/herdr-status.ts";
-import { registerHerdrLifecycleAuthority } from "../integrations/herdr-lifecycle-authority.ts";
-import { registerHerdrBackgroundAdapter } from "../integrations/herdr-background-adapter.ts";
 import { registerSubagentRpcBridge } from "./rpc.ts";
 import { clearSlashSnapshots, getSlashRenderableSnapshot, resolveSlashMessageDetails, restoreSlashFinalSnapshots, type SlashMessageDetails } from "../slash/slash-live-state.ts";
 import { inspectSubagentStatus } from "../runs/background/run-status.ts";
-import { listAsyncRuns } from "../runs/background/async-status.ts";
 import { resolveWaitToolConfig } from "../runs/background/subagent-wait.ts";
 import { registerWaitTool } from "../runs/background/wait-tool.ts";
 import { drainOutstandingWork } from "../runs/background/auto-drain.ts";
@@ -258,12 +255,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		},
 	);
 
-	const runtimeDisposers: Array<() => void> = [];
 	const runtimeCleanup = () => {
-		for (const dispose of runtimeDisposers) {
-			try { dispose(); } catch {}
-		}
-		runtimeDisposers.length = 0;
 		stopResultWatcher();
 		state.currentSessionId = null;
 		completionNotifier.dispose();
@@ -473,67 +465,20 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	const existingVisibleControlNotices = globalStore[controlNoticeSeenStoreKey];
 	const visibleControlNotices = existingVisibleControlNotices instanceof Set ? existingVisibleControlNotices as Set<string> : new Set<string>();
 	globalStore[controlNoticeSeenStoreKey] = visibleControlNotices;
-	const trackedHerdrRuns = () => [...state.asyncJobs.values()].map((job) => ({
-		id: job.asyncId,
-		status: job.status,
-		sessionId: job.sessionId,
-		parentWorkflowRunId: job.parentWorkflowRunId,
-		agents: job.agents,
-		needsAttention: job.activityState === "needs_attention",
-	}));
-	const herdrRuns = () => {
-		const sessionId = state.currentSessionId;
-		if (!sessionId) return [];
-		try {
-			// Discover ownership without reconciliation first: the shared temp root
-			// can contain other sessions, which this pane must never repair or stop.
-			const candidates = listAsyncRuns(DIRS.async, {
-				states: ["queued", "running"],
-				sessionId,
-				reconcile: false,
-			});
-			const runs = candidates.flatMap((candidate) => listAsyncRuns(DIRS.async, {
-				runId: candidate.id,
-				states: ["queued", "running"],
-				sessionId,
-				resultsDir: DIRS.results,
-			}));
-			return runs.map((run) => ({
-				id: run.id,
-				status: run.state,
-				sessionId: run.sessionId,
-				parentWorkflowRunId: run.parentWorkflowRunId,
-				agents: run.steps.map((step) => step.agent),
-				needsAttention: run.activityState === "needs_attention",
-			}));
-		} catch {
-			// Keep the last reconciled in-memory projection when the shared
-			// lifecycle root is temporarily unreadable; the next refresh retries.
-			return trackedHerdrRuns();
-		}
-	};
-	const activeTrackedHerdrRuns = () => trackedHerdrRuns().filter((job) => job.status === "queued" || job.status === "running");
-	const herdrAuthorityEnabled = config.herdrLifecycleAuthority === true;
+	const activeHerdrRuns = () => [...state.asyncJobs.values()]
+		.filter((job) => job.status === "queued" || job.status === "running")
+		.map((job) => ({
+			id: job.asyncId,
+			agents: job.agents,
+			needsAttention: job.activityState === "needs_attention",
+		}));
 	const herdrStatusBridge = registerHerdrStatusBridge({
 		events: pi.events,
-		env: herdrAuthorityEnabled ? {} : process.env,
-		// Preserve the legacy bridge's in-memory projection. Artifact-backed
-		// reconciliation belongs exclusively to the opt-in lifecycle adapter.
-		getRuns: activeTrackedHerdrRuns,
+		getRuns: activeHerdrRuns,
 		async runHerdr(args) {
 			await pi.exec(process.env.HERDR_BIN || "herdr", [...args], { timeout: 5_000 });
 		},
 	});
-	const herdrLifecycleAuthority = registerHerdrLifecycleAuthority({
-		enabled: herdrAuthorityEnabled,
-		events: pi.events,
-	});
-	const herdrBackgroundAdapter = registerHerdrBackgroundAdapter({
-		enabled: herdrAuthorityEnabled,
-		events: pi.events,
-		getRuns: herdrRuns,
-	});
-	runtimeDisposers.push(herdrStatusBridge.dispose, herdrLifecycleAuthority.dispose, herdrBackgroundAdapter.dispose);
 	const controlEventHandler = (payload: unknown) => {
 		handleSubagentControlNotice({
 			pi,
@@ -564,8 +509,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		pi.events.on(SUBAGENT_CONTROL_EVENT, controlEventHandler),
 		pi.events.on(SUBAGENT_STEERING_NOTICE_EVENT, steeringNoticeHandler),
 		herdrStatusBridge.dispose,
-		herdrLifecycleAuthority.dispose,
-		herdrBackgroundAdapter.dispose,
 		rpcBridge.dispose,
 	];
 	globalStore[eventUnsubscribeStoreKey] = eventUnsubscribes;
@@ -629,27 +572,16 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		fleetStatus?.setContext(ctx);
 	};
 
-	pi.on("agent_start", (_event, ctx) => {
+	pi.on("agent_start", () => {
 		herdrStatusBridge.agentStarted();
-		herdrBackgroundAdapter.agentStarted();
-		herdrLifecycleAuthority.agentStarted(ctx);
 	});
 
-	pi.on("agent_settled", (_event, ctx) => {
-		herdrLifecycleAuthority.agentSettled(ctx);
-	});
-
-	pi.on("session_start", async (event, ctx) => {
+	pi.on("session_start", (event, ctx) => {
 		const recovering = event.reason === "startup" || event.reason === "reload" || event.reason === "resume";
 		resetSessionState(ctx, recovering);
 		herdrStatusBridge.sessionStarted({
 			hasUI: ctx.hasUI === true,
-			runs: activeTrackedHerdrRuns(),
-		});
-		await herdrLifecycleAuthority.sessionStarted(event, ctx, () => {
-			// The authority invokes providers only after its environment/TUI/conflict
-			// checks, but before its first semantic state report.
-			if (state.currentSessionId) herdrBackgroundAdapter.sessionStarted(state.currentSessionId);
+			runs: activeHerdrRuns(),
 		});
 		rpcBridge.emitReady(ctx);
 		supervisorChannel.start();
@@ -698,6 +630,5 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			if (!isStaleExtensionContextError(error)) throw error;
 		}
 		await herdrStatusBridge.flush();
-		await herdrLifecycleAuthority.flush();
 	});
 }

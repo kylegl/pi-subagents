@@ -31,14 +31,10 @@ interface AsyncJobTrackerModule {
 const trackerMod = await tryImport<AsyncJobTrackerModule>("./src/runs/background/async-job-tracker.ts");
 const available = !!trackerMod;
 
-function nullableString(value: string | null = null): string | null {
-	return value;
-}
-
 function createState() {
 	return {
 		baseCwd: "/repo",
-		currentSessionId: nullableString(),
+		currentSessionId: null,
 		asyncJobs: new Map(),
 		fleetJobs: new Map(),
 		foregroundRuns: new Map(),
@@ -1261,36 +1257,6 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 			await new Promise((resolve) => setTimeout(resolve, 30));
 			assert.equal(recorder.events.some((event) => event.channel === "subagent:control-event"), true);
 			assert.equal(recorder.events.some((event) => event.channel === "subagent:control-intercom"), false);
-		} finally {
-			removeTempDir(asyncRoot);
-		}
-	});
-
-	it("emits authoritative activity changes when attention clears", async () => {
-		const asyncRoot = createTempDir("pi-async-job-tracker-");
-		try {
-			const runDir = path.join(asyncRoot, "run-activity");
-			fs.mkdirSync(runDir, { recursive: true });
-			const statusPath = path.join(runDir, "status.json");
-			const writeStatus = (activityState?: "needs_attention") => fs.writeFileSync(statusPath, JSON.stringify({
-				runId: "run-activity",
-				mode: "single",
-				state: "running",
-				startedAt: Date.now() - 1000,
-				lastUpdate: Date.now(),
-				...(activityState ? { activityState } : {}),
-				steps: [{ agent: "worker", status: "running", ...(activityState ? { activityState } : {}) }],
-			}), "utf-8");
-			writeStatus("needs_attention");
-
-			const state = createState();
-			const recorder = createEventRecorder();
-			const tracker = trackerMod!.createAsyncJobTracker(recorder.pi, state as never, asyncRoot, { pollIntervalMs: 10 });
-			tracker.handleStarted({ id: "run-activity", asyncDir: runDir, agent: "worker" });
-			await waitForCondition(() => recorder.events.some((event) => event.channel === "subagent:async-activity-changed" && (event.data as any).to === "needs_attention"), "attention activity event");
-
-			writeStatus();
-			await waitForCondition(() => recorder.events.some((event) => event.channel === "subagent:async-activity-changed" && (event.data as any).from === "needs_attention" && (event.data as any).to === undefined), "cleared activity event");
 		} finally {
 			removeTempDir(asyncRoot);
 		}

@@ -154,8 +154,6 @@ export interface TokenUsage {
 }
 
 export type ActivityState = "active_long_running" | "needs_attention";
-/** Emitted after the async tracker reconciles an authoritative activity-state change. */
-export const SUBAGENT_ASYNC_ACTIVITY_CHANGED_EVENT = "subagent:async-activity-changed";
 export type ControlEventType = "active_long_running" | "needs_attention";
 export type ControlNotificationChannel = "event" | "async" | "intercom";
 
@@ -1740,8 +1738,6 @@ export interface ExtensionConfig {
 	missions?: MissionStoreConfig;
 	/** Small fixed authority policy for the supported operational actions. */
 	authorityPolicy?: AuthorityPolicyConfig;
-	/** Opt in to the package-owned Herdr Pi lifecycle authority. */
-	herdrLifecycleAuthority?: boolean;
 }
 
 // ============================================================================

@@ -15,7 +15,6 @@
 - Added automatic Herdr status metadata for active async runs, including reload recovery, needs-attention blocking, and a forward-compatible `herdr:busy` sibling event for semantic working state. Thanks to @magoz for #730.
 - Added optional Herdr 0.7.5+ drill-in inspector panes for async runs, with durable pane bindings, lifecycle/transcript/mission dashboards, FleetView opening, and steer/stop controls through the existing file control channel.
 - Added Herdr project panes so an orchestrator can open a project-rooted Pi session for substantial cross-codebase work.
-- Added an optional composable Herdr lifecycle integration with a package-owned authority and provider snapshots. Thanks to @kylegl for kylegl/pi-subagents#1.
 - Added optional `thinking` and `fallbackModels` fields to `/subagents` profile agent overrides, so a saved profile can pin reasoning effort and fallbacks (not just the model) — important for reasoning-sensitive models where the thinking level is load-bearing. Thanks to @dt-benedict for #741.
 
 ### Changed
