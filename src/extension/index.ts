@@ -538,7 +538,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 
 		execute(id, params, signal, onUpdate, ctx) {
 			const input = params as SubagentParamsLike;
-			if (input.tasks !== undefined || input.chain !== undefined || input.concurrency !== undefined || input.chainDir !== undefined || (input.worktree !== undefined && !(input.worktree === true && input.agent))) {
+			if (input.tasks !== undefined || input.chain !== undefined || input.concurrency !== undefined || input.chainDir !== undefined || (input.worktree === true && !input.agent && input.workflowScript === undefined)) {
 				return Promise.resolve({ content: [{ type: "text", text: "Legacy top-level chain and parallel inputs were removed; use workflowScript." }], isError: true, details: { mode: "management", results: [] } });
 			}
 			return executeSubagentCollapsed(id, input, signal ?? new AbortController().signal, onUpdate, ctx);

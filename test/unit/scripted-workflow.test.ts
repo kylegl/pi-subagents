@@ -154,6 +154,30 @@ describe("scripted workflow runtime", () => {
 		}
 	});
 
+	it("identifies invalid and missing stable runs.all keys", async () => {
+		const cases = [
+			{
+				script: `return await runs.all([{ key: "bad key", agent: "worker" }]);`,
+				expected: /runs\.all item 0.*invalid key.*bad key/i,
+			},
+			{
+				script: `return await runs.all([{ agent: "worker" }]);`,
+				expected: /runs\.all item 0.*missing.*stable.*key/i,
+			},
+		];
+		for (const { script, expected } of cases) {
+			await assert.rejects(
+				runWorkflowScript({
+					script,
+					timeoutMs: 2_000,
+					async launch(key) { return { key, ok: true, output: "unexpected", artifactPaths: [], results: [] }; },
+					async status(key) { return { key, ok: true, output: "ok", artifactPaths: [] }; },
+				}),
+				(error: unknown) => error instanceof WorkflowScriptError && expected.test(error.message),
+			);
+		}
+	});
+
 	it("rejects a runs.all batch incompatible with an earlier key before dispatching the batch", async () => {
 		const launches: string[] = [];
 		await assert.rejects(

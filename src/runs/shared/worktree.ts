@@ -135,13 +135,8 @@ function resolveRepoState(cwd: string): RepoState {
 	const cwdRelative = resolveRepoCwdRelative(cwd);
 	const toplevel = runGitChecked(cwd, ["rev-parse", "--show-toplevel"]).trim();
 
-	// pi-subagents writes durable runtime state under .pi-subagents/ by default;
-	// that state must not make managed isolation unusable for later runs.
-	const status = runGitChecked(toplevel, ["status", "--porcelain", "--", ":!.pi-subagents"]);
-	if (status.trim().length > 0) {
-		throw new Error("worktree isolation requires a clean git working tree. Commit or stash changes first.");
-	}
-
+	// Managed worktrees branch from committed HEAD. Source-checkout changes remain
+	// untouched and are intentionally absent from each isolated child checkout.
 	const baseCommit = runGitChecked(toplevel, ["rev-parse", "HEAD"]).trim();
 	return { toplevel, cwdRelative, baseCommit };
 }

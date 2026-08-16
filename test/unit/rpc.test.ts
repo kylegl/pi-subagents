@@ -335,6 +335,11 @@ describe("subagent extension RPC bridge", () => {
 		assert.equal(reply.success, true);
 		assert.equal(executedParams.worktree, true);
 		assert.equal(executedParams.async, true);
+
+		const disabledReply = await request(events, "spawn-no-worktree", "spawn", { agent: "worker", task: "Do work", worktree: false });
+		assert.equal(disabledReply.success, true);
+		assert.equal(executedParams.worktree, false);
+		assert.equal(executedParams.async, true);
 		bridge.dispose();
 	});
 

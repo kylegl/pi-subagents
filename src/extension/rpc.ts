@@ -420,7 +420,7 @@ async function executeChecked(
 
 function spawnParams(params: unknown): SubagentParamsLike {
 	const input = assertRecordParams(params, "spawn");
-	if (input.tasks !== undefined || input.chain !== undefined || input.concurrency !== undefined || input.chainDir !== undefined || (input.worktree !== undefined && !(input.worktree === true && input.agent))) {
+	if (input.tasks !== undefined || input.chain !== undefined || input.concurrency !== undefined || input.chainDir !== undefined || (input.worktree === true && !input.agent && input.workflowScript === undefined)) {
 		throw new SubagentRpcError("invalid_params", "RPC spawn no longer accepts top-level chain or parallel inputs; use workflowScript.");
 	}
 	if (input.action !== undefined) {

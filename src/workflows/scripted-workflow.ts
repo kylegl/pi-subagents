@@ -35,11 +35,16 @@ function formatRef(result) {
 const runFingerprints = new Map();
 
 function validateRunCall(key, params, label, fingerprints) {
-  if (typeof key !== "string" || !runKeyPattern.test(key)) throw new Error(label + " has an invalid key.");
+  if (key === undefined) throw new Error(label + " is missing a stable run key; provide key: 'name'.");
+  if (typeof key !== "string" || !runKeyPattern.test(key)) {
+    const rendered = typeof key === "string" ? JSON.stringify(key) : String(key) + " (" + typeof key + ")";
+    throw new Error(label + " has invalid key " + rendered + "; keys must be 1-128 characters, start with a letter or number, and use only letters, numbers, '.', '_' or '-'.");
+  }
   if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error(label + " requires a params object.");
-  if (Object.prototype.hasOwnProperty.call(params, "action") || Object.prototype.hasOwnProperty.call(params, "workflowScript") || Object.prototype.hasOwnProperty.call(params, "tasks") || Object.prototype.hasOwnProperty.call(params, "chain") || Object.prototype.hasOwnProperty.call(params, "concurrency") || Object.prototype.hasOwnProperty.call(params, "chainDir")) {
+  const orchestrationKeys = ["action", "workflowScript", "tasks", "chain", "concurrency", "chainDir"].filter((key) => Object.prototype.hasOwnProperty.call(params, key));
+  if (orchestrationKeys.length > 0) {
     const hint = label === "runs.run" ? "; use runs.all(...) and JavaScript control flow for orchestration." : ".";
-    throw new Error(label + " accepts one child via { agent, task } and execution controls only" + hint);
+    throw new Error(label + " accepts one child via { agent, task } and execution controls only; offending keys: " + orchestrationKeys.join(", ") + hint);
   }
   if (params.worktree !== undefined && typeof params.worktree !== "boolean") throw new Error(label + " worktree must be true or false.");
   assertJsonValue(params, label + " params");

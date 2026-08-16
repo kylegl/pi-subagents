@@ -71,6 +71,40 @@ describe("subagent extension child mode", () => {
 		);
 	});
 
+	it("does not misroute an explicit worktree:false single-child call as legacy parallel input", () => {
+		const script = String.raw`
+			import registerSubagentExtension from "./index.ts";
+			const events = { on() { return () => {}; }, emit() {} };
+			let registeredTool;
+			const fakePi = new Proxy({
+				events,
+				registerTool(tool) { if (tool.name === "subagent") registeredTool = tool; },
+				registerCommand() {}, registerShortcut() {}, registerMessageRenderer() {}, sendMessage() {}, getSessionName() {},
+			}, { get(target, prop) { return prop in target ? target[prop] : () => undefined; } });
+			registerSubagentExtension(fakePi);
+			if (!registeredTool) throw new Error("tool not registered");
+			const ctx = {
+				cwd: process.cwd(), hasUI: false,
+				ui: { setToolsExpanded() {}, setWidget() {}, requestRender() {}, theme: { fg(_name, text) { return text; }, bg(_name, text) { return text; }, bold(text) { return text; } } },
+				sessionManager: { getSessionId() { return "session-test"; }, getSessionFile() { return null; } },
+				modelRegistry: { getAvailable() { return []; } },
+			};
+			const result = await registeredTool.execute("direct-false", {
+				agent: "missing-worker", task: "test", worktree: false, async: true,
+			}, new AbortController().signal, undefined, ctx);
+			const text = result.content.map((part) => part.text ?? "").join("\n");
+			if (/legacy top-level chain and parallel inputs/i.test(text)) throw new Error("single child was misrouted: " + text);
+			if (result.details.mode !== "single") throw new Error("expected single mode, got " + result.details.mode);
+			const workflow = await registeredTool.execute("workflow-worktree", {
+				workflowScript: "return null", worktree: true, async: false,
+			}, new AbortController().signal, undefined, ctx);
+			const workflowText = workflow.content.map((part) => part.text ?? "").join("\n");
+			if (/legacy top-level chain and parallel inputs/i.test(workflowText)) throw new Error("workflow worktree was misrouted: " + workflowText);
+			if (workflow.details.mode !== "workflow") throw new Error("expected workflow mode, got " + workflow.details.mode);
+		`;
+		execFileSync(process.execPath, ["--experimental-strip-types", "--import", "./test/support/register-loader.mjs", "--input-type=module", "--eval", script], { cwd: projectRoot, env: parentToolEnv(), stdio: "pipe" });
+	});
+
 	it("renders only the public single and workflow execution modes", () => {
 		const script = String.raw`
 			import registerSubagentExtension from "./index.ts";

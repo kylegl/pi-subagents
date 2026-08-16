@@ -146,15 +146,20 @@ describe("worktree", () => {
 		}
 	});
 
-	it("createWorktrees rejects dirty repositories", () => {
+	it("creates clean worktrees from HEAD when the source checkout is dirty", () => {
 		const repoDir = createRepo("pi-worktree-dirty-");
+		let setup: WorktreeSetup | undefined;
 		try {
 			fs.writeFileSync(path.join(repoDir, "tracked.txt"), "dirty\n", "utf-8");
-			assert.throws(
-				() => createWorktrees(repoDir, "dirty", 1),
-				/worktree isolation requires a clean git working tree/i,
-			);
+			fs.writeFileSync(path.join(repoDir, "untracked.txt"), "source only\n", "utf-8");
+			setup = createWorktrees(repoDir, "dirty", 1);
+			const worktree = setup.worktrees[0]!;
+			assert.equal(fs.readFileSync(path.join(worktree.path, "tracked.txt"), "utf-8"), "initial\n");
+			assert.equal(fs.existsSync(path.join(worktree.path, "untracked.txt")), false);
+			assert.equal(git(worktree.path, ["status", "--porcelain"]), "");
+			assert.match(git(repoDir, ["status", "--porcelain"]), /tracked\.txt/);
 		} finally {
+			if (setup) cleanupWorktrees(setup);
 			cleanupRepo(repoDir);
 		}
 	});
