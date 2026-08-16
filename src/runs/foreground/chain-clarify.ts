@@ -380,14 +380,16 @@ export class ChainClarifyComponent implements Component {
 		const base = this.resolvedBehaviors[stepIndex]!;
 		const override = this.behaviorOverrides.get(stepIndex);
 		if (!override) return base;
+		const mandatorySkills = override.skills === undefined ? base.mandatorySkills : (override.skills || []);
 
 		return {
-			output: override.output !== undefined ? override.output : base.output,
+			output: override.output === undefined ? base.output : override.output,
 			outputMode: base.outputMode,
-			reads: override.reads !== undefined ? override.reads : base.reads,
-			progress: override.progress !== undefined ? override.progress : base.progress,
-			skills: override.skills !== undefined ? override.skills : base.skills,
-			model: override.model !== undefined ? override.model : base.model,
+			reads: override.reads === undefined ? base.reads : override.reads,
+			progress: override.progress === undefined ? base.progress : override.progress,
+			skills: override.skills === undefined ? base.skills : override.skills,
+			mandatorySkills,
+			model: override.model === undefined ? base.model : override.model,
 		};
 	}
 
@@ -561,14 +563,14 @@ export class ChainClarifyComponent implements Component {
 	/** Filter models based on search query */
 	private filterModels(): void {
 		const query = this.modelSearchQuery.toLowerCase();
-		if (!query) {
-			this.filteredModels = [...this.availableModels];
-		} else {
+		if (query) {
 			this.filteredModels = this.availableModels.filter((m) =>
 				m.fullId.toLowerCase().includes(query) ||
 				m.id.toLowerCase().includes(query) ||
 				m.provider.toLowerCase().includes(query)
 			);
+		} else {
+			this.filteredModels = [...this.availableModels];
 		}
 		this.modelSelectedIndex = Math.min(this.modelSelectedIndex, Math.max(0, this.filteredModels.length - 1));
 	}
@@ -697,13 +699,13 @@ export class ChainClarifyComponent implements Component {
 
 	private filterSkills(): void {
 		const query = this.skillSearchQuery.toLowerCase();
-		if (!query) {
-			this.filteredSkills = [...this.availableSkills];
-		} else {
+		if (query) {
 			this.filteredSkills = this.availableSkills.filter((s) =>
 				s.name.toLowerCase().includes(query) ||
 				(s.description?.toLowerCase().includes(query) ?? false),
 			);
+		} else {
+			this.filteredSkills = [...this.availableSkills];
 		}
 		this.skillCursorIndex = Math.min(this.skillCursorIndex, Math.max(0, this.filteredSkills.length - 1));
 	}
