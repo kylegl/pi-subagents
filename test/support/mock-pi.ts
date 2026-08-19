@@ -22,6 +22,7 @@ interface MockPiResponse {
 		stdoutRaw?: string;
 		stdoutBase64Chunks?: string[];
 		stderr?: string;
+		writeFiles?: Array<{ path: string; content: string }>;
 	}>;
 	echoEnv?: string[];
 	missingTools?: string[];

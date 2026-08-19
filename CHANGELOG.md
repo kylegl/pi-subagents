@@ -37,6 +37,7 @@
 - Scheduled subagent runs are now enabled by default; set `{ "scheduledRuns": { "enabled": false } }` to opt out.
 
 ### Fixed
+- Deferred managed-worktree capture and cleanup until detached foreground children truly exit, preserving late edits and abandoned dirty work, and stopped async status from advertising missing output paths by falling back to durable artifacts or bounded terminal output.
 - Kept durable schedule timers and completion ownership isolated per project, recorded elapsed overlaps without queueing an immediate rerun, rejected symlink-backed schedule paths, and made the deferred mission contract explicit. Thanks to @nicobailon for #815.
 - Preserve actionable multi-line subagent tool errors in collapsed result rendering. Thanks to @xz-dev for #824.
 - Sanitize Fleet transcript content and warnings before terminal display while preserving normal Unicode and formatting. Thanks to @xz-dev for #823.

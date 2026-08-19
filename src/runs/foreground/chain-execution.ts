@@ -809,6 +809,37 @@ ${step.message}` : ""}` }],
 					});
 				}
 				const agentNames = step.parallel.map((task) => task.agent);
+				const flatStartIndex = globalTaskIndex;
+				let detachedParallelResults: SingleResult[] | undefined;
+				const terminalDetachedResults = new Map<number, SingleResult>();
+				const notifiedDetachedIndexes = new Set<number>();
+				let deferredHandoffFinalized = false;
+				const settleDetachedWorktreeOwnership = (): void => {
+					if (!worktreeSetup || !detachedParallelResults || deferredHandoffFinalized) return;
+					const detachedIndexes = detachedParallelResults
+						.map((result, index) => result.detached ? index : -1)
+						.filter((index) => index >= 0);
+					if (detachedIndexes.length === 0 || detachedIndexes.some((index) => !terminalDetachedResults.has(index))) return;
+					for (const index of detachedIndexes) detachedParallelResults[index] = terminalDetachedResults.get(index)!;
+					deferredHandoffFinalized = true;
+					const finalized = finalizeParallelWorktreeHandoff({
+						output: "",
+						worktreeSetup,
+						artifactsDir,
+						runId,
+						cwd: parallelCwd,
+						stepIndex,
+						flatStartIndex,
+						agents: agentNames,
+						results: detachedParallelResults,
+					});
+					if (finalized.reference) parallelHandoff = finalized.reference;
+					for (const index of detachedIndexes) {
+						if (notifiedDetachedIndexes.has(index)) continue;
+						notifiedDetachedIndexes.add(index);
+						onDetachedExit?.(flatStartIndex + index, terminalDetachedResults.get(index)!);
+					}
+				};
 				const parallelBehaviors = resolveParallelBehaviors(step.parallel, agents, stepIndex, chainSkills)
 					.map((behavior, taskIndex) => suppressProgressForReadOnlyTask(behavior, parallelTemplates[taskIndex] ?? step.parallel[taskIndex]?.task, originalTask));
 				for (let taskIndex = 0; taskIndex < step.parallel.length; taskIndex++) {
@@ -869,7 +900,14 @@ ${step.message}` : ""}` }],
 					deadlineAt,
 					turnBudget: params.turnBudget,
 					usageBudget: params.usageBudget,
-					onDetachedExit,
+					onDetachedExit: (index, result) => {
+						if (!worktreeSetup) {
+							onDetachedExit?.(index, result);
+							return;
+						}
+						terminalDetachedResults.set(index - flatStartIndex, result);
+						settleDetachedWorktreeOwnership();
+					},
 					onForegroundChildSettled: params.onForegroundChildSettled,
 					toolBudget: params.toolBudget,
 					configToolBudget: params.configToolBudget,
@@ -884,21 +922,30 @@ ${step.message}` : ""}` }],
 					if (result.artifactPaths) allArtifactPaths.push(result.artifactPaths);
 				}
 				let worktreeSuffix = "";
+				const hasDetachedChild = parallelResults.some((result) => result.detached);
 				if (worktreeSetup) {
 					worktreeFinalized = true;
-					const finalized = finalizeParallelWorktreeHandoff({
-						output: "",
-						worktreeSetup,
-						artifactsDir,
-						runId,
-						cwd: parallelCwd,
-						stepIndex,
-						flatStartIndex: globalTaskIndex - step.parallel.length,
-						agents: agentNames,
-						results: parallelResults,
-					});
-					if (finalized.reference) parallelHandoff = finalized.reference;
-					worktreeSuffix = finalized.output.trim();
+					if (hasDetachedChild) {
+						// Transfer cleanup ownership to the terminal detached callbacks. A
+						// missing callback (for example on shutdown) intentionally leaves the
+						// managed worktrees and pending manifest intact for recovery.
+						detachedParallelResults = parallelResults;
+						settleDetachedWorktreeOwnership();
+					} else {
+						const finalized = finalizeParallelWorktreeHandoff({
+							output: "",
+							worktreeSetup,
+							artifactsDir,
+							runId,
+							cwd: parallelCwd,
+							stepIndex,
+							flatStartIndex,
+							agents: agentNames,
+							results: parallelResults,
+						});
+						if (finalized.reference) parallelHandoff = finalized.reference;
+						worktreeSuffix = finalized.output.trim();
+					}
 				}
 				const interruptedIndexInStep = parallelResults.findIndex((result) => result.interrupted);
 				const interrupted = interruptedIndexInStep >= 0 ? parallelResults[interruptedIndexInStep] : undefined;

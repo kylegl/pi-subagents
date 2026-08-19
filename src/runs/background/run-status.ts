@@ -43,6 +43,34 @@ function hasExistingSessionFile(value: unknown): value is string {
 	return typeof value === "string" && fs.existsSync(value);
 }
 
+function formatTerminalOutputFallback(resultPath: string | undefined): string | undefined {
+	if (!resultPath || !fs.existsSync(resultPath)) return undefined;
+	try {
+		const data = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as {
+			output?: unknown;
+			summary?: unknown;
+			results?: Array<{ output?: unknown; summary?: unknown; artifactPaths?: { outputPath?: unknown } }>;
+		};
+		for (const child of data.results ?? []) {
+			const artifactPath = child.artifactPaths?.outputPath;
+			if (typeof artifactPath !== "string") continue;
+			try {
+				if (fs.statSync(artifactPath).isFile()) return `Output artifact: ${artifactPath}`;
+			} catch {
+				// Try the next durable artifact, then fall back to bounded inline text.
+			}
+		}
+		const inline = [data.output, data.summary, ...(data.results ?? []).flatMap((child) => [child.output, child.summary])]
+			.find((value): value is string => typeof value === "string" && value.trim().length > 0)
+			?.trim();
+		if (!inline) return undefined;
+		const bounded = inline.length > 800 ? `${inline.slice(0, 797)}...` : inline;
+		return `Output preview: ${bounded}`;
+	} catch {
+		return undefined;
+	}
+}
+
 function formatCheckpointGuidance(runId: string | undefined, checkpoint: AsyncStatus["checkpoint"] | undefined): string | undefined {
 	if (!runId || !checkpoint || checkpoint.status !== "pending") return undefined;
 	return `Checkpoint: ${checkpoint.name}${checkpoint.message ? ` — ${checkpoint.message}` : ""}\nApprove: subagent({ action: "approve-checkpoint", id: "${runId}" })\nReject: subagent({ action: "reject-checkpoint", id: "${runId}" })`;
@@ -357,6 +385,9 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 				nestedWarning = `Nested status unavailable: ${error instanceof Error ? error.message : String(error)}`;
 			}
 			const outputPath = formatAsyncRunOutputPath({ asyncDir, outputFile: status.outputFile });
+			const terminalOutputFallback = !outputPath && status.state !== "queued" && status.state !== "running"
+				? formatTerminalOutputFallback(resultPath ?? undefined)
+				: undefined;
 			const progressLabel = formatAsyncRunProgressLabel({
 				mode: status.mode,
 				state: status.state,
@@ -401,6 +432,7 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 				status.turnBudget ? `Turn budget: ${status.turnBudget.turnCount}/${status.turnBudget.maxTurns}+${status.turnBudget.graceTurns} (${status.turnBudget.outcome})` : undefined,
 				`Dir: ${asyncDir}`,
 				outputPath ? `Output: ${outputPath}` : undefined,
+				terminalOutputFallback,
 				status.parallelHandoff ? `Parallel handoff: ${status.parallelHandoff.path}` : undefined,
 				reconciliation.message ? `Diagnosis: ${reconciliation.message}` : undefined,
 				reconciliation.resultPath && fs.existsSync(reconciliation.resultPath) ? `Result: ${reconciliation.resultPath}` : undefined,

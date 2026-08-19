@@ -363,6 +363,7 @@ async function main() {
 				await new Promise((resolve) => setTimeout(resolve, step.delay));
 			}
 			await waitForReleasePath(step?.waitForPath);
+			writeDeclaredFiles(step ?? {});
 			if (Array.isArray(step?.jsonl) && step.jsonl.length > 0) {
 					await writeResponseEntries(step.jsonl, jsonMode, args);
 				}
