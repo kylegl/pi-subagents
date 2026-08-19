@@ -60,7 +60,7 @@ function formatTerminalOutputFallback(resultPath: string | undefined): string | 
 				// Try the next durable artifact, then fall back to bounded inline text.
 			}
 		}
-		const inline = [data.output, data.summary, ...(data.results ?? []).flatMap((child) => [child.output, child.summary])]
+		const inline = [data.output, ...(data.results ?? []).map((child) => child.output), ...(data.results ?? []).map((child) => child.summary), data.summary]
 			.find((value): value is string => typeof value === "string" && value.trim().length > 0)
 			?.trim();
 		if (!inline) return undefined;

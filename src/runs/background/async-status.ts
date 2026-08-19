@@ -484,7 +484,9 @@ export function formatAsyncRunOutputPath(run: Pick<AsyncRunSummary, "asyncDir" |
 	const candidate = path.resolve(asyncDir, run.outputFile);
 	if (candidate === asyncDir || !candidate.startsWith(`${asyncDir}${path.sep}`)) return undefined;
 	try {
-		return fs.statSync(candidate).isFile() ? candidate : undefined;
+		// Output paths are artifacts, not indirections: rejecting symlinks keeps
+		// their real targets from escaping the async run directory.
+		return fs.lstatSync(candidate).isFile() ? candidate : undefined;
 	} catch {
 		return undefined;
 	}

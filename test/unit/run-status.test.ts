@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 import { inspectSubagentStatus } from "../../src/runs/background/run-status.ts";
+import { formatAsyncRunOutputPath } from "../../src/runs/background/async-status.ts";
 import { createNestedRoute, writeNestedEvent } from "../../src/runs/shared/nested-events.ts";
 import { TEMP_ROOT_DIR, type SubagentState } from "../../src/shared/types.ts";
 
@@ -42,6 +43,55 @@ describe("async run status inspection", () => {
 			assert.doesNotMatch(text, /missing-output\.log/);
 			assert.match(text, new RegExp(`Output artifact: ${artifactPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 			assert.doesNotMatch(text, /Output preview:/);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("prefers persisted child output over a generic terminal summary", () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-child-output-"));
+		try {
+			const asyncRoot = path.join(root, "runs");
+			const resultsDir = path.join(root, "results");
+			const asyncDir = path.join(asyncRoot, "run-child-output");
+			fs.mkdirSync(asyncDir, { recursive: true });
+			fs.mkdirSync(resultsDir, { recursive: true });
+			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
+				runId: "run-child-output", mode: "single", state: "complete", startedAt: 100,
+				outputFile: "missing.log", steps: [{ agent: "worker", status: "complete" }],
+			}), "utf-8");
+			fs.writeFileSync(path.join(resultsDir, "run-child-output.json"), JSON.stringify({
+				runId: "run-child-output", success: true, summary: "1/1 succeeded",
+				results: [{ agent: "worker", output: "actual final answer" }],
+			}), "utf-8");
+
+			const text = textContent(inspectSubagentStatus({ id: "run-child-output" }, { asyncDirRoot: asyncRoot, resultsDir }));
+			assert.match(text, /Output preview: actual final answer/);
+			assert.doesNotMatch(text, /Output preview: 1\/1 succeeded/);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects an async output symlink whose target escapes the run directory", (t) => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-output-symlink-"));
+		try {
+			const asyncDir = path.join(root, "run");
+			const external = path.join(root, "external.log");
+			const output = path.join(asyncDir, "output-0.log");
+			fs.mkdirSync(asyncDir, { recursive: true });
+			fs.writeFileSync(external, "outside", "utf-8");
+			try {
+				fs.symlinkSync(external, output, process.platform === "win32" ? "file" : undefined);
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				if (process.platform === "win32" && (code === "EPERM" || code === "EACCES")) {
+					t.skip("creating symlinks requires Windows Developer Mode or elevation");
+					return;
+				}
+				throw error;
+			}
+			assert.equal(formatAsyncRunOutputPath({ asyncDir, outputFile: "output-0.log" }), undefined);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
