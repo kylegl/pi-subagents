@@ -2761,6 +2761,7 @@ interface ForegroundParallelRunInput {
 	liveResults: (SingleResult | undefined)[];
 	liveProgress: (AgentProgress | undefined)[];
 	onUpdate?: (r: AgentToolResult<Details>) => void;
+	onDetachedExit?: (index: number, result: SingleResult) => void;
 	worktreeSetup?: WorktreeSetup;
 	timeoutMs?: number;
 	deadlineAt?: number;
@@ -3007,6 +3008,7 @@ async function runForegroundParallelTasks(input: ForegroundParallelRunInput): Pr
 			onControlEvent: input.onControlEvent,
 			onDetachedExit: (result) => {
 				try {
+					input.onDetachedExit?.(index, result);
 					updateRememberedForegroundChild(input.state, { runId: input.runId, mode: "parallel", cwd: taskCwd, sessionId: input.parentSessionId, index, result, events: input.intercomEvents });
 				} finally {
 					try {
@@ -3303,6 +3305,19 @@ async function runParallelPath(data: ExecutionContextData, deps: ExecutorDeps): 
 	if (errorResult) return errorResult;
 
 	let worktreeFinalized = false;
+	let detachedResults: SingleResult[] | undefined;
+	const terminalDetachedResults = new Map<number, SingleResult>();
+	let deferredHandoffFinalized = false;
+	const finalizeDetachedHandoff = (): void => {
+		if (!worktreeSetup || !detachedResults || deferredHandoffFinalized) return;
+		const detachedIndexes = detachedResults
+			.map((result, index) => result.detached ? index : -1)
+			.filter((index) => index >= 0);
+		if (detachedIndexes.length === 0 || detachedIndexes.some((index) => !terminalDetachedResults.has(index))) return;
+		for (const index of detachedIndexes) detachedResults[index] = terminalDetachedResults.get(index)!;
+		deferredHandoffFinalized = true;
+		finalizeParallelWorktreeHandoff({ worktreeSetup, artifactsDir, runId, cwd: effectiveCwd, tasks, results: detachedResults });
+	};
 	try {
 		if (worktreeSetup) {
 			writePendingParallelHandoff({
@@ -3386,6 +3401,10 @@ async function runParallelPath(data: ExecutionContextData, deps: ExecutorDeps): 
 			liveResults,
 			liveProgress,
 			onUpdate,
+			onDetachedExit: (index, result) => {
+				terminalDetachedResults.set(index, result);
+				finalizeDetachedHandoff();
+			},
 			worktreeSetup,
 			timeoutMs: data.timeoutMs,
 			deadlineAt,
@@ -3409,9 +3428,18 @@ async function runParallelPath(data: ExecutionContextData, deps: ExecutorDeps): 
 			attachRootChildrenToSteps(runId, results, foregroundControl.nestedChildren);
 		}
 		let handoff: ReturnType<typeof finalizeParallelWorktreeHandoff> | undefined;
+		const hasDetachedChild = results.some((result) => result.detached);
 		if (worktreeSetup) {
 			worktreeFinalized = true;
-			handoff = finalizeParallelWorktreeHandoff({ worktreeSetup, artifactsDir, runId, cwd: effectiveCwd, tasks, results });
+			if (hasDetachedChild) {
+				// Detached children retain ownership of every managed worktree in the
+				// group. Finalization is transferred to their terminal callbacks so late
+				// edits are captured; if the process exits first, dirty work is preserved.
+				detachedResults = results;
+				finalizeDetachedHandoff();
+			} else {
+				handoff = finalizeParallelWorktreeHandoff({ worktreeSetup, artifactsDir, runId, cwd: effectiveCwd, tasks, results });
+			}
 		}
 		const interrupted = results.find((result) => result.interrupted);
 		const totalCost = sumResultsCost(results);

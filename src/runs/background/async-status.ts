@@ -480,7 +480,14 @@ function formatStepLine(step: AsyncRunStepSummary): string {
 
 export function formatAsyncRunOutputPath(run: Pick<AsyncRunSummary, "asyncDir" | "outputFile">): string | undefined {
 	if (!run.outputFile) return undefined;
-	return path.isAbsolute(run.outputFile) ? run.outputFile : path.join(run.asyncDir, run.outputFile);
+	const asyncDir = path.resolve(run.asyncDir);
+	const candidate = path.resolve(asyncDir, run.outputFile);
+	if (candidate === asyncDir || !candidate.startsWith(`${asyncDir}${path.sep}`)) return undefined;
+	try {
+		return fs.statSync(candidate).isFile() ? candidate : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 export function formatAsyncRunProgressLabel(run: Pick<AsyncRunSummary, "mode" | "state" | "currentStep" | "chainStepCount" | "parallelGroups" | "steps">): string {
