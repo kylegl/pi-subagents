@@ -19,6 +19,60 @@ function textContent(result: ReturnType<typeof inspectSubagentStatus>): string {
 }
 
 describe("async run status inspection", () => {
+	it("uses an existing result artifact when the advertised live output is missing", () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-artifact-fallback-"));
+		try {
+			const asyncRoot = path.join(root, "runs");
+			const resultsDir = path.join(root, "results");
+			const asyncDir = path.join(asyncRoot, "run-artifact");
+			const artifactPath = path.join(root, "artifacts", "output.md");
+			fs.mkdirSync(asyncDir, { recursive: true });
+			fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+			fs.mkdirSync(resultsDir, { recursive: true });
+			fs.writeFileSync(artifactPath, "durable output", "utf-8");
+			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
+				runId: "run-artifact", mode: "single", state: "complete", startedAt: 100,
+				outputFile: path.join(asyncDir, "missing-output.log"), steps: [{ agent: "worker", status: "complete" }],
+			}), "utf-8");
+			fs.writeFileSync(path.join(resultsDir, "run-artifact.json"), JSON.stringify({
+				runId: "run-artifact", success: true, results: [{ agent: "worker", output: "inline output", artifactPaths: { outputPath: artifactPath } }],
+			}), "utf-8");
+
+			const text = textContent(inspectSubagentStatus({ id: "run-artifact" }, { asyncDirRoot: asyncRoot, resultsDir }));
+			assert.doesNotMatch(text, /missing-output\.log/);
+			assert.match(text, new RegExp(`Output artifact: ${artifactPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+			assert.doesNotMatch(text, /Output preview:/);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("uses bounded terminal output when no live log or artifact exists", () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-inline-fallback-"));
+		try {
+			const asyncRoot = path.join(root, "runs");
+			const resultsDir = path.join(root, "results");
+			const asyncDir = path.join(asyncRoot, "run-inline");
+			fs.mkdirSync(asyncDir, { recursive: true });
+			fs.mkdirSync(resultsDir, { recursive: true });
+			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
+				runId: "run-inline", mode: "single", state: "complete", startedAt: 100,
+				outputFile: "output-0.log", steps: [{ agent: "worker", status: "complete" }],
+			}), "utf-8");
+			fs.writeFileSync(path.join(resultsDir, "run-inline.json"), JSON.stringify({
+				runId: "run-inline", success: true, results: [{ agent: "worker", output: "x".repeat(1000) }],
+			}), "utf-8");
+
+			const text = textContent(inspectSubagentStatus({ id: "run-inline" }, { asyncDirRoot: asyncRoot, resultsDir }));
+			const preview = text.split("Output preview: ")[1]?.split("\n")[0] ?? "";
+			assert.equal(preview.length, 800);
+			assert.match(preview, /\.\.\.$/);
+			assert.doesNotMatch(text, /Output: .*output-0\.log/);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("repairs stale running status and reports diagnosis plus result path", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-stale-"));
 		try {
@@ -71,6 +125,7 @@ describe("async run status inspection", () => {
 			const runOutputPath = path.join(asyncDir, "combined-output.log");
 			const firstStepOutputPath = path.join(asyncDir, "output-0.log");
 			const secondStepOutputPath = path.join(asyncDir, "output-1.log");
+			fs.writeFileSync(runOutputPath, "combined reviewers", "utf-8");
 			fs.writeFileSync(firstStepOutputPath, "reviewer one", "utf-8");
 			fs.writeFileSync(secondStepOutputPath, "reviewer two", "utf-8");
 			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({

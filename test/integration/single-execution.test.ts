@@ -323,9 +323,10 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		allowMutatingManagementActions = true,
 		initialAsyncJobs: SubagentState["asyncJobs"] = new Map(),
 		workflowControllers?: Map<string, AbortController>,
+		intercomEvents = createEventBus(),
 	) {
 		return createSubagentExecutor!({
-			pi: { events: createEventBus(), getSessionName: () => undefined },
+			pi: { events: intercomEvents, getSessionName: () => undefined },
 			state: {
 				baseCwd: tempDir,
 				currentSessionId: initialSpawnState?.sessionId ?? null,
@@ -633,6 +634,55 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		assert.equal(handoff.groups[0]?.cleanup.state, "complete");
 		assert.equal(handoff.groups[0]?.cleanup.tasks[0]?.worktreeRemoved, true);
 
+	});
+
+	it("keeps a detached managed worktree until late edits are captured", { skip: !createSubagentExecutor || process.platform === "win32" ? "executor unavailable or worktree paths differ on Windows" : undefined }, async () => {
+		execFileSync("git", ["init"], { cwd: tempDir, stdio: "ignore" });
+		execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: tempDir });
+		execFileSync("git", ["config", "user.name", "Test User"], { cwd: tempDir });
+		fs.writeFileSync(path.join(tempDir, "base.txt"), "base\n", "utf-8");
+		execFileSync("git", ["add", "base.txt"], { cwd: tempDir });
+		execFileSync("git", ["commit", "-m", "base"], { cwd: tempDir, stdio: "ignore" });
+		mockPi.onCall({
+			steps: [
+				{ jsonl: [events.toolStart("contact_supervisor", { reason: "need_decision", message: "Need input" })] },
+				{ delay: 150, writeFiles: [{ path: "late.txt", content: "late edit\n" }], jsonl: [events.assistantMessage("finished after detach")] },
+			],
+		});
+		const bus = createEventBus();
+		const executor = makeExecutor([makeAgent("worker", { systemPrompt: "Intercom orchestration channel:" })], {}, false, undefined, true, new Map(), undefined, bus);
+		let detached = false;
+		const result = await executor.execute(
+			"detached-worktree",
+			{ async: false, agent: "worker", task: "Edit late", worktree: true },
+			new AbortController().signal,
+			(update: { details?: { progress?: Array<{ currentTool?: string }> } }) => {
+				if (detached || !update.details?.progress?.some((entry) => entry.currentTool === "contact_supervisor")) return;
+				detached = true;
+				bus.emit(INTERCOM_DETACH_REQUEST_EVENT, { requestId: "detached-worktree" });
+			},
+			makeMinimalCtx(tempDir),
+		);
+		assert.equal(result.details.results[0]?.detached, true);
+		const runId = result.details.runId;
+		assert.ok(runId);
+		const listedWhileDetached = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: tempDir, encoding: "utf-8" });
+		assert.match(listedWhileDetached, /worktree .*pi-worktree-/s);
+		let handoffPath: string | undefined;
+		let handoffText = "";
+		const deadline = Date.now() + 5000;
+		while (!handoffText.includes("late.txt") && Date.now() < deadline) {
+			handoffPath ??= fs.readdirSync(tempDir, { recursive: true, encoding: "utf-8" })
+				.map((entry) => path.join(tempDir, entry))
+				.find((entry) => entry.endsWith(`${path.sep}${runId}.json`) && entry.includes(`${path.sep}handoffs${path.sep}`));
+			if (handoffPath) handoffText = fs.readFileSync(handoffPath, "utf-8");
+			if (!handoffText.includes("late.txt")) await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		assert.ok(handoffPath, "expected deferred handoff manifest");
+		assert.match(handoffText, /late\.txt/);
+		assert.match(handoffText, /"worktreeRemoved": true/);
+		const listedAfterExit = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: tempDir, encoding: "utf-8" });
+		assert.doesNotMatch(listedAfterExit, /pi-worktree-/);
 	});
 
 	it("lets runs.all siblings settle when one child fails", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
