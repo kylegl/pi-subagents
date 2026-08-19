@@ -1694,6 +1694,94 @@ describe("chain execution — parallel steps", { skip: !available ? "pi packages
 		assert.equal(result.details.results.some((entry) => entry.detached === true && entry.exitCode === -2), true);
 	});
 
+	it("defers parallel-chain worktree handoff until detached children exit", { skip: process.platform === "win32" ? "worktree and git-wrapper paths differ on Windows" : undefined }, async () => {
+		git(["init"]);
+		git(["config", "user.email", "test@example.com"]);
+		git(["config", "user.name", "Test User"]);
+		fs.writeFileSync(path.join(tempDir, "base.txt"), "base\n", "utf-8");
+		git(["add", "base.txt"]);
+		git(["commit", "-m", "base"]);
+		mockPi.onCall({
+			matchArgIncludes: "Edit after handoff",
+			steps: [
+				{ jsonl: [events.toolStart("contact_supervisor", { reason: "need_decision", message: "Need input" })] },
+				{ delay: 300, writeFiles: [{ path: "late.txt", content: "late chain edit\n" }], jsonl: [events.assistantMessage("durable child handoff")] },
+			],
+		});
+		mockPi.onCall({ matchArgIncludes: "Settle in parallel", delay: 100, output: "parallel sibling settled" });
+		const agents = [
+			makeAgent("a", { systemPrompt: "Intercom orchestration channel:" }),
+			makeAgent("b", { systemPrompt: "Intercom orchestration channel:" }),
+		];
+		const intercomEvents = createEventBus();
+		const runId = `parallel-chain-detached-worktrees-${Date.now().toString(36)}`;
+		const testArtifactsDir = path.join(tempDir, "artifacts");
+		const handoffPath = path.join(testArtifactsDir, "handoffs", `${runId}.json`);
+		const removeLog = path.join(tempDir, "git-worktree-removes.log");
+		const wrapperDir = path.join(tempDir, "git-wrapper");
+		const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf-8" }).stdout.trim();
+		fs.mkdirSync(wrapperDir);
+		fs.writeFileSync(path.join(wrapperDir, "git"), `#!/bin/sh\ncase " $* " in *" worktree remove --force "*) printf '%s\\n' "$*" >> "$GIT_REMOVE_LOG";; esac\nexec "$REAL_GIT" "$@"\n`, { mode: 0o755 });
+		const originalPath = process.env.PATH;
+		const originalRealGit = process.env.REAL_GIT;
+		const originalRemoveLog = process.env.GIT_REMOVE_LOG;
+		process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
+		process.env.REAL_GIT = realGit;
+		process.env.GIT_REMOVE_LOG = removeLog;
+		let detachEmitted = false;
+		try {
+			const result = await executeChain(makeChainParams(
+				[{ parallel: [{ agent: "a", task: "Edit after handoff" }, { agent: "b", task: "Settle in parallel" }], worktree: true }],
+				agents,
+				{
+					runId,
+					artifactsDir: testArtifactsDir,
+					worktreeBaseDir: path.join(tempDir, "managed-worktrees"),
+					intercomEvents,
+					onUpdate(update: { details?: { progress?: Array<{ currentTool?: string }> } }) {
+						if (detachEmitted || !update.details?.progress?.some((entry) => entry.currentTool === "contact_supervisor")) return;
+						detachEmitted = true;
+						intercomEvents.emit(INTERCOM_DETACH_REQUEST_EVENT, { requestId: runId });
+					},
+				},
+			));
+
+			assert.equal(detachEmitted, true, JSON.stringify(result, null, 2));
+			assert.equal(result.details.results.some((entry) => entry.detached), true, JSON.stringify(result, null, 2));
+			const pending = JSON.parse(fs.readFileSync(handoffPath, "utf-8")) as { groups: Array<{ cleanup: { state: string; tasks: Array<{ reason?: string }> } }> };
+			assert.equal(pending.groups[0]?.cleanup.state, "partial", JSON.stringify(pending, null, 2));
+			assert.equal(pending.groups[0]?.cleanup.tasks.every((task) => task.reason === "cleanup pending durable handoff capture"), true);
+			assert.match(git(["worktree", "list", "--porcelain"]), /pi-worktree-/);
+
+			let handoffText = "";
+			const deadline = Date.now() + 5000;
+			while (Date.now() < deadline) {
+				handoffText = fs.readFileSync(handoffPath, "utf-8");
+				if (handoffText.includes('"state": "complete"')) break;
+				await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+			const handoff = JSON.parse(handoffText) as {
+				groups: Array<{
+					children: Array<{ summary: string; patch: { path: string } }>;
+					cleanup: { state: string; tasks: Array<{ path: string; worktreeRemoved: boolean }> };
+				}>;
+			};
+			assert.equal(handoff.groups[0]?.cleanup.state, "complete");
+			assert.match(handoff.groups[0]?.children[0]?.summary ?? "", /durable child handoff/);
+			assert.match(fs.readFileSync(handoff.groups[0]!.children[0]!.patch.path, "utf-8"), /late\.txt/);
+			assert.doesNotMatch(git(["worktree", "list", "--porcelain"]), /pi-worktree-/);
+			const removals = fs.readFileSync(removeLog, "utf-8").trim().split("\n").filter(Boolean);
+			assert.equal(removals.length, 2);
+			assert.equal(new Set(removals.map((line) => line.split(" ").at(-1))).size, 2);
+			assert.equal(handoff.groups[0]?.cleanup.tasks.length, 2);
+			assert.equal(handoff.groups[0]?.cleanup.tasks.every((task) => task.worktreeRemoved), true);
+		} finally {
+			if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath;
+			if (originalRealGit === undefined) delete process.env.REAL_GIT; else process.env.REAL_GIT = originalRealGit;
+			if (originalRemoveLog === undefined) delete process.env.GIT_REMOVE_LOG; else process.env.GIT_REMOVE_LOG = originalRemoveLog;
+		}
+	});
+
 	it("stops a sequential chain when a child detaches for intercom coordination", async () => {
 		mockPi.onCall({
 			steps: [
