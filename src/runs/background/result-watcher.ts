@@ -357,10 +357,13 @@ export function createResultWatcher(
 	};
 
 	const startResultWatcher = () => {
-		if (state.watcher) return;
+		// session_start may replace the active context while the filesystem watcher
+		// remains healthy. Renew delivery ownership before reusing that watcher so
+		// in-flight work from the previous session cannot deliver into the new one.
 		activeSessionId = state.currentSessionId;
 		deliveryActive = true;
 		deliveryEpoch += 1;
+		if (state.watcher) return;
 		if (state.watcherRestartTimer) {
 			timers.clearTimeout(state.watcherRestartTimer);
 			timers.clearInterval(state.watcherRestartTimer);

@@ -70,6 +70,8 @@ export interface ScheduleRunRecord {
 type ScheduledRunManagerDeps = {
 	config: ExtensionConfig;
 	launch(params: SubagentParamsLike, ctx: ExtensionContext, signal: AbortSignal): Promise<AgentToolResult<Details>>;
+	/** Returns the live context for the active Pi session. */
+	getContext?: () => ExtensionContext | null;
 	storeRoot?: string;
 	now?: () => number;
 	randomId?: () => string;
@@ -332,19 +334,31 @@ function executionParams(schedule: ScheduleRecord): SubagentParamsLike {
 	};
 }
 
-function snapshotContext(ctx: ExtensionContext, cwd: string): ExtensionContext {
+type ScheduledRunOwner = {
+	cwd: string;
+	sessionId: string | null;
+	sessionFile: string | null;
+};
+
+function snapshotOwner(ctx: ExtensionContext, cwd: string): ScheduledRunOwner {
+	return {
+		cwd,
+		sessionId: ctx.sessionManager.getSessionId() ?? null,
+		sessionFile: ctx.sessionManager.getSessionFile() ?? null,
+	};
+}
+
+function contextForOwner(ctx: ExtensionContext, owner: ScheduledRunOwner): ExtensionContext {
 	const source = ctx.sessionManager;
-	const sessionId = source.getSessionId();
-	const sessionFile = source.getSessionFile();
 	const sessionManager = new Proxy(source, {
 		get(target, property) {
-			if (property === "getSessionId") return () => sessionId;
-			if (property === "getSessionFile") return () => sessionFile;
+			if (property === "getSessionId") return () => owner.sessionId;
+			if (property === "getSessionFile") return () => owner.sessionFile;
 			const value = Reflect.get(target, property, target) as unknown;
 			return typeof value === "function" ? value.bind(target) : value;
 		},
 	});
-	return { ...ctx, cwd, sessionManager };
+	return { ...ctx, cwd: owner.cwd, sessionManager };
 }
 
 export function listScheduledRunSummaries(cwd: string, root?: string): ScheduleRecord[] {
@@ -354,7 +368,8 @@ export function listScheduledRunSummaries(cwd: string, root?: string): ScheduleR
 export class ScheduledRunManager {
 	private store?: ScheduleStore;
 	private readonly stores = new Map<string, ScheduleStore>();
-	private readonly contexts = new Map<string, ExtensionContext>();
+	private readonly owners = new Map<string, ScheduledRunOwner>();
+	private liveContext: ExtensionContext | null = null;
 	private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
 	private readonly now: () => number;
 	private readonly randomId: () => string;
@@ -377,7 +392,8 @@ export class ScheduledRunManager {
 		this.stopTimers();
 		this.store = undefined;
 		this.stores.clear();
-		this.contexts.clear();
+		this.owners.clear();
+		this.liveContext = null;
 	}
 
 	async handleToolCall(params: SubagentParamsLike, ctx: ExtensionContext): Promise<AgentToolResult<Details>> {
@@ -698,8 +714,9 @@ export class ScheduledRunManager {
 	private selectProject(cwd: string, ctx: ExtensionContext): void {
 		const projectCwd = path.resolve(cwd);
 		const root = scheduledRunStorePath(projectCwd, undefined, this.deps.storeRoot);
-		if (path.resolve(ctx.cwd) === projectCwd) this.contexts.set(root, snapshotContext(ctx, projectCwd));
-		else if (!this.contexts.has(root)) throw new Error(`Cannot use project '${projectCwd}' until that project has been opened in this runtime.`);
+		this.liveContext = ctx;
+		if (path.resolve(ctx.cwd) === projectCwd) this.owners.set(root, snapshotOwner(ctx, projectCwd));
+		else if (!this.owners.has(root)) throw new Error(`Cannot use project '${projectCwd}' until that project has been opened in this runtime.`);
 		let store = this.stores.get(root);
 		if (!store) {
 			store = new ScheduleStore(root, this.deps.storeRoot === undefined ? projectCwd : undefined);
@@ -721,9 +738,10 @@ export class ScheduledRunManager {
 	}
 
 	private requireContext(store: ScheduleStore): ExtensionContext {
-		const ctx = this.contexts.get(store.root);
-		if (!ctx) throw new Error("Schedule runtime context is unavailable.");
-		return ctx;
+		const owner = this.owners.get(store.root);
+		const ctx = this.deps.getContext?.() ?? this.liveContext;
+		if (!owner || !ctx) throw new Error("Schedule runtime context is unavailable.");
+		return contextForOwner(ctx, owner);
 	}
 
 	private timerKey(store: ScheduleStore, id: string): string {

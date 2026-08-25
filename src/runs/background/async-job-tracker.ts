@@ -35,6 +35,12 @@ const MAX_CONTROL_EVENT_LINE_BYTES = 1024 * 1024;
 const CONTROL_EVENT_SCAN_WINDOW_BYTES = 2 * 1024 * 1024;
 const MAX_RECENT_FLEET_JOBS = 20;
 
+function isStaleExtensionContextError(error: unknown): boolean {
+	return error instanceof Error
+		&& (error.message.includes("This extension ctx is stale")
+			|| error.message.includes("Extension context no longer active"));
+}
+
 function rememberFleetJob(state: SubagentState, job: AsyncJobState): void {
 	state.fleetJobs ??= new Map();
 	state.fleetJobs.set(job.asyncId, job);
@@ -66,7 +72,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 		try {
 			if (ctx.hasUI) rerenderWidget(ctx, jobs);
 		} catch (error) {
-			if (error instanceof Error && error.message.includes("extension ctx is stale")) {
+			if (isStaleExtensionContextError(error)) {
 				state.lastUiContext = null;
 				return;
 			}
