@@ -73,7 +73,7 @@ describe("result watcher", () => {
 		}
 	});
 
-	it("persists scheduled stop cleanup after session replacement without stale-session delivery", async () => {
+	it("observes retained-project completions without changing active-session delivery", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-result-watcher-scheduled-"));
 		const resultsDir = path.join(root, "results");
 		const project = path.join(root, "project-a");
@@ -102,7 +102,7 @@ describe("result watcher", () => {
 			const state = createState();
 			state.currentSessionId = "session-b";
 			const resultPath = path.join(resultsDir, "scheduled-a.json");
-			fs.writeFileSync(resultPath, JSON.stringify({ id: "scheduled-a", sessionId: "session-a", success: false, state: "stopped", stopped: true, summary: "stopped" }), "utf-8");
+			fs.writeFileSync(resultPath, JSON.stringify({ id: "scheduled-a", sessionId: "session-a", success: true, summary: "done" }), "utf-8");
 			const watcher = createResultWatcher({
 				events: {
 					on: () => () => {},
@@ -122,46 +122,12 @@ describe("result watcher", () => {
 
 			assert.equal(state.currentSessionId, "session-b");
 			assert.equal(emitted.length, 0);
-			assert.match(fs.readFileSync(path.join(scheduleDir, "history.json"), "utf-8"), /"state": "failed_run"/);
 			assert.equal(fs.existsSync(path.join(scheduleDir, "active.lock")), false);
+			assert.match(fs.readFileSync(path.join(scheduleDir, "history.json"), "utf-8"), /"state": "completed"/);
 			assert.equal(fs.existsSync(resultPath), true, "the owning session keeps delivery ownership of its result file");
 		} finally {
 			manager.stop();
 			fs.rmSync(root, { recursive: true, force: true });
-		}
-	});
-
-	it("renews result delivery ownership when session replacement reuses the watcher", async () => {
-		const resultsDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-result-watcher-replacement-"));
-		try {
-			const delivered: string[] = [];
-			const state = createState();
-			state.currentSessionId = "session-a";
-			const watcher = createResultWatcher({
-				events: { on: () => () => {}, emit: () => {} },
-			}, state, resultsDir, 60_000, {
-				notifier: {
-					deliver: async (result) => {
-						delivered.push(result.sessionId as string);
-						return true;
-					},
-				},
-			});
-			try {
-				watcher.startResultWatcher();
-				state.currentSessionId = "session-b";
-				watcher.startResultWatcher();
-				const resultPath = path.join(resultsDir, "natural-b.json");
-				fs.writeFileSync(resultPath, JSON.stringify({ id: "natural-b", sessionId: "session-b", success: true, summary: "done" }), "utf-8");
-				watcher.primeExistingResults();
-				await new Promise((resolve) => setTimeout(resolve, 100));
-				assert.deepEqual(delivered, ["session-b"]);
-				assert.equal(fs.existsSync(resultPath), false, "accepted replacement-session completion is cleaned up");
-			} finally {
-				watcher.stopResultWatcher();
-			}
-		} finally {
-			fs.rmSync(resultsDir, { recursive: true, force: true });
 		}
 	});
 

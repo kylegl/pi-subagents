@@ -292,43 +292,40 @@ describe("recurring schedule execution", () => {
 		assert.equal(none.launches.length, 0);
 	});
 
-	it("uses the replacement session's live context while preserving project schedule ownership", async () => {
+	it("keeps project timers, contexts, and completion ownership across session_start bindings", async () => {
 		const h = harness();
-		let sessionAStale = false;
-		Object.defineProperty(h.ctx, "hasUI", {
-			configurable: true,
-			get() {
-				if (sessionAStale) throw new Error("Extension context no longer active");
-				return true;
-			},
-		});
 		await h.manager.handleToolCall({ action: "schedule.create", id: "project-a", every: "1h", agent: "worker" }, h.ctx);
 
 		const projectB = path.join(h.root, "project-b");
 		fs.mkdirSync(projectB);
-		const projectBCtx = { ...context(projectB, "session-b"), hasUI: false } as ExtensionContext;
-		sessionAStale = true;
+		const projectBCtx = context(projectB, "session-b");
+		const sourceSessionManager = h.ctx.sessionManager as { getSessionId(): string | null; getSessionFile(): string | null };
+		const getSourceSessionId = sourceSessionManager.getSessionId;
+		const getSourceSessionFile = sourceSessionManager.getSessionFile;
+		sourceSessionManager.getSessionId = () => "session-b";
+		sourceSessionManager.getSessionFile = () => path.join(projectB, "session-b.jsonl");
 		h.manager.bindSession(projectBCtx);
 		await h.manager.handleToolCall({ action: "schedule.create", id: "project-b", every: "1h", agent: "worker" }, projectBCtx);
 		assert.equal(h.timers.values.size, 2, "both project timers remain armed after session_start binds project B");
 
 		h.clock.now += 3_600_000;
-		assert.doesNotThrow(() => h.timers.fireAll());
+		h.timers.fireAll();
 		await flush();
 		assert.equal(h.launches.length, 2);
-		assert.equal(h.launches[0]!.ctx.hasUI, false, "project A launch uses session B's live context rather than stale session A UI");
 		assert.equal(h.launches[0]!.ctx.cwd, h.ctx.cwd);
 		assert.equal(h.launches[0]!.ctx.sessionManager.getSessionId(), "session-a");
 		assert.equal(h.launches[0]!.ctx.sessionManager.getSessionFile(), path.join(h.ctx.cwd, "session-a.jsonl"));
 		assert.equal(h.launches[1]!.ctx.cwd, projectB);
 		assert.equal(h.launches[1]!.ctx.sessionManager.getSessionId(), "session-b");
 		assert.equal(h.launches[1]!.ctx.sessionManager.getSessionFile(), path.join(projectB, "session-b.jsonl"));
+		sourceSessionManager.getSessionId = getSourceSessionId;
+		sourceSessionManager.getSessionFile = getSourceSessionFile;
 		h.launches[0]!.resolve({ content: [{ type: "text", text: "Async" }], details: { mode: "single", results: [], asyncId: "async-a" } });
 		h.launches[1]!.resolve({ content: [{ type: "text", text: "Async" }], details: { mode: "single", results: [], asyncId: "async-b" } });
 		await flush();
 
 		h.manager.handleAsyncCompletion({ runId: "async-a", success: true });
-		const history = await h.manager.handleToolCall({ action: "schedule.history", id: "project-a", cwd: h.ctx.cwd }, projectBCtx);
+		const history = await h.manager.handleToolCall({ action: "schedule.history", id: "project-a" }, h.ctx);
 		assert.match(text(history), /completed.*async async-a/);
 		const projectARoot = scheduledRunStorePath(h.ctx.cwd, undefined, path.join(h.root, "stores"));
 		assert.equal(fs.existsSync(path.join(projectARoot, "project-a", "active.lock")), false);

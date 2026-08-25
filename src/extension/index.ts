@@ -381,7 +381,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	let executorScheduled: ((id: string, params: SubagentParamsLike, signal: AbortSignal, ctx: ExtensionContext) => Promise<AgentToolResult<Details>>) | undefined;
 	const scheduledRunManager = createScheduledRunManager({
 		config,
-		getContext: () => state.lastUiContext,
 		launch: (params, ctx, signal) => {
 			if (!executorScheduled) {
 				return Promise.resolve({

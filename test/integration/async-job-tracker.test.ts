@@ -122,7 +122,7 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 			const tracker = trackerMod!.createAsyncJobTracker(recorder.pi, state as never, asyncRoot);
 			(state as { lastUiContext: unknown }).lastUiContext = {
 				get hasUI() {
-					throw new Error("Extension context no longer active");
+					throw new Error("This extension ctx is stale after session replacement or reload.");
 				},
 			};
 
